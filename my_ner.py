@@ -58,11 +58,36 @@ def build_map(lists):
                 maps[e] = len(maps)
     return maps
 
-char_lists, tag_lists, char2id, tag2id = build_corpus('train', make_vocab=True, data_dir='Dataset/weiboNER')
-print(char_lists)
-print(tag_lists)
-print(char2id)
-print(tag2id)
 
+class MyDataset(Dataset):  # Inherit the torch Dataset
+    def __init__(self, data, tag, char2id, tag2id):
+        # char to index
+        self.data = data
+        self.tag = tag
+        self.char2id = char2id
+        self.tag2id = tag2id
 
+    def __getitem__(self,index):
+        # get one sentence
+        sentence = self.data[index]
+        sentence_tag = self.tag[index]
+
+        char_index = [self.char2id[i] for i in data]
+        
+
+        pass
+    def __len__(self):
+        pass
+
+if __name__ == "__main__":
+    # pre-setting
+    device = 'cude:0' if torch.cuda.is_available() else 'cpu'
+
+    # data-
+    train_data, train_tag, char_to_index, tag_to_id = build_corpus('train', make_vocab=True, data_dir='Dataset/weiboNER')
+    dev_data, dev_tag = build_corpus('dev', make_vocab=False, data_dir='Dataset/weiboNER')
+
+    #
+    char_num = len(char_to_index)
+    class_num = len(tag_to_id)
 
