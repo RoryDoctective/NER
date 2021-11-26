@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import f1_score
 
+
 # https://github.com/luopeixiang/named_entity_recognition/blob/master/data.py
 def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
     """Read in data"""
@@ -73,8 +74,14 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
         sentence_tag = self.tag[index]
 
         # get each char's/tag's index in each sentence
-        char_index = [self.char2id[i] for i in sentence]
+        #   tag should always be seen before.
         tag_index = [self.tag2id[i] for i in sentence_tag]
+        char_index = []
+        for i in sentence:
+            if i in self.char2id:
+                char_index.append(self.char2id[i])
+            else:  # if not in the look up table, it is unknown.
+                char_index.append(self.char2id['<UNK>'])
 
         return char_index, tag_index
 
@@ -126,14 +133,12 @@ class MyModel(nn.Module):
             return loss
 
 
-
-
 def test():
     global char_to_index, model, id_to_tag, device
     while True:
         text = input('请输入:')
         text_index = [[char_to_index[i] for i in text]] # add dim this dim = 1
-        text_index.torch.tensor(text_index, dtype=torch.int64, device=device)
+        text_index = torch.tensor(text_index, dtype=torch.int64, device=device)
         model.forward(text_index)
         prediction = [id_to_tag[i] for i in model.prediction]
 
@@ -154,8 +159,8 @@ if __name__ == "__main__":
     class_num = len(tag_to_id)
 
     # training setting
-    epoch = 5
-    train_batch_size = 50
+    epoch = 500
+    train_batch_size = 20
     dev_batch_size = 100
     embedding_num = 100
     hidden_num = 128
@@ -203,7 +208,7 @@ if __name__ == "__main__":
                 all_tag.extend(dev_batch_tag_index.cpu().numpy().reshape(-1).tolist())
                 score = f1_score(all_tag, all_pre, average='micro')
                 # print('score')
-            print(f'epoch:{e}, f1_score:{f1_score:.3f}, dev_loss:{dev_loss:.3f}')
+            print(f'epoch:{e}, f1_score:{score:.3f}, dev_loss:{dev_loss:.3f}')
 
     test()
 
