@@ -15,7 +15,7 @@ def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
 
     assert split in ['train', 'dev', 'test']
 
-    char_lists = [] #
+    char_lists = []
     tag_lists = []
 
     with open(os.path.join(data_dir, 'weiboNER_2nd_conll.'+split), 'r', encoding='utf-8') as f:
@@ -159,8 +159,8 @@ if __name__ == "__main__":
     class_num = len(tag_to_id)
 
     # training setting
-    epoch = 500
-    train_batch_size = 20
+    epoch = 10
+    train_batch_size = 50
     dev_batch_size = 100
     embedding_num = 100
     hidden_num = 128
