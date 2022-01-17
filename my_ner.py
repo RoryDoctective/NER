@@ -376,8 +376,53 @@ def test():
 
         print([f'{w}_{s}' for w, s in zip(text, prediction)])
 
+def final_test_BiLSTM_CRF(test_dataloader):
+    global char_to_index, model, id_to_tag, device, tag_to_id
+    # evaluation
+    model.eval()  # F1, acc, recall, F1 score
+    # 验证时不做更新
+    with torch.no_grad():
+        # need to recall all of them
+        all_pre_test = []
+        all_tag_test = []
 
-def final_test(test_dataloader):
+        # we do it batch by batch
+        for test_batch_char_index, test_batch_tag_index, batch_len in test_dataloader:
+            pre_tag = model.test(test_batch_char_index, batch_len)
+            all_pre_test.extend(pre_tag.detach().cpu().numpy().tolist())
+            all_tag_test.extend(test_batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
+
+
+        # statistics
+        length_all = len(all_tag_test)
+
+        # remove all O s
+        if REMOVE_O:  # true
+            # find the index of O tag:
+            O_id = tag_to_id['O']
+            # find all O
+            O_tag_indices = [i for i in range(length_all)
+                            if all_tag_test[i] == O_id]
+            # get rid of Os
+            all_tag_test = [tag for i, tag in enumerate(all_tag_test)
+                                if i not in O_tag_indices]
+            all_pre_test = [tag for i, tag in enumerate(all_pre_test)
+                                 if i not in O_tag_indices]
+            # report
+            print("原总标记数为{}，移除了{}个O标记，占比{:.2f}%".format(
+                length_all,
+                len(O_tag_indices),
+                len(O_tag_indices) / length_all * 100
+            ))
+        # calculate score
+        test_score = f1_score(all_tag_test, all_pre_test, average='micro')  # micro/多类别的
+        # print('score')
+
+        # prediction = [id_to_tag[i] for i in model.prediction]
+
+        print(f'final_test: f1_score:{test_score:.3f}.)')
+
+def final_test_BiLSTM(test_dataloader):
     global char_to_index, model, id_to_tag, device, tag_to_id
     # evaluation
     model.eval()  # F1, acc, recall, F1 score
@@ -425,6 +470,13 @@ def final_test(test_dataloader):
 
         print(f'final_test: f1_score:{test_score:.3f}, test_loss:{test_loss:.3f}')
 
+        # human readable presentations
+        # input
+        # true value
+        # predicted value
+        print([f'{w}_{s}' for w, s in zip(text, prediction)])
+
+
 
 if __name__ == "__main__":
     # pre-setting
@@ -444,7 +496,7 @@ if __name__ == "__main__":
     class_num = len(tag_to_id)
 
     # training setting
-    epoch = 10
+    epoch = 5
     train_batch_size = 10
     dev_batch_size = 100
     test_batch_size = 1
@@ -524,5 +576,8 @@ if __name__ == "__main__":
             print(f'epoch:{e}, f1_score:{score:.3f}, dev_loss:{dev_loss:.3f}')
 
     # Test the model:
-    # final_test(test_dataloader)
+    if BI_LSTM_CRF:
+        final_test_BiLSTM_CRF(test_dataloader)
+    else:
+        final_test_BiLSTM(test_dataloader)
     test()
