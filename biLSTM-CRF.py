@@ -18,7 +18,7 @@ def build_corpus(split, make_vocab=True, data_dir="Dataset/weiboNER"):
         for line in f:
             if line != '\n':
                 word, tag = line.strip('\n').split()
-                word_list.append(word)
+                word_list.append(word[0])
                 tag_list.append(tag)
             else:
                 word_lists.append(word_list+["<END>"])
@@ -284,8 +284,10 @@ def test():
 if __name__ == "__main__":
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-    train_data,train_tag,word_2_index,tag_2_index = build_corpus("train",make_vocab=True)
-    dev_data,dev_tag = build_corpus("dev",make_vocab=False)
+    train_data, train_tag, word_2_index, tag_2_index = build_corpus("train", make_vocab=True,
+                                                                 data_dir='Dataset/weiboNER')
+    dev_data, dev_tag = build_corpus("dev", make_vocab=False, data_dir='Dataset/weiboNER')
+
     index_2_tag = [i for i in tag_2_index]
 
     corpus_num = len(word_2_index)
@@ -321,6 +323,7 @@ if __name__ == "__main__":
         all_pre = []
         all_tag = []
         for dev_batch_data,dev_batch_tag,batch_len in dev_dataloader:
+            # using model.test
             pre_tag = model.test(dev_batch_data,batch_len)
             all_pre.extend(pre_tag.detach().cpu().numpy().tolist())
             all_tag.extend(dev_batch_tag[:,:-1].detach().cpu().numpy().reshape(-1).tolist())
