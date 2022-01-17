@@ -42,9 +42,9 @@ def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
                 char_list = []
                 tag_list = []
 
-    # shortest sentences first, longest sentences last
-    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=False)
-    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=False)
+    # reverse = False == shortest sentences first, longest sentences last
+    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=True)
+    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=True)
 
     if make_vocab:  # only for training set
         char2id = build_map(char_lists)
@@ -196,6 +196,7 @@ class LSTM_CRF_Model(nn.Module):
 
         # This need to be self_defined.
         self.loss_fun = self.cal_lstm_crf_loss
+
     # 完全看不懂
     def cal_lstm_crf_loss(self, crf_scores, targets):
         # 该损失函数的计算可以参考: https: // arxiv.org / pdf / 1603.01360.pdf
@@ -258,6 +259,7 @@ class LSTM_CRF_Model(nn.Module):
         # 训练大约两个epoch loss变成负数，从数学的角度上来说，loss = -logP
         loss = (all_path_scores - golden_scores) / batch_size
         return loss
+
     # 完全看不懂
     def indexed(self, targets, tagset_size, start_id):
         """将targets中的数转化为在[T*T]大小序列中的索引,T是标注的种类"""
@@ -266,6 +268,7 @@ class LSTM_CRF_Model(nn.Module):
             targets[:, col] += (targets[:, col - 1] * tagset_size)
         targets[:, 0] += (start_id * tagset_size)
         return targets
+
 
     def forward(self, batch_data, batch_tag=None):
         embedding = self.embedding(batch_data)
@@ -441,12 +444,12 @@ if __name__ == "__main__":
     class_num = len(tag_to_id)
 
     # training setting
-    epoch = 15  # 10
-    train_batch_size = 30  # 10
+    epoch = 10
+    train_batch_size = 10
     dev_batch_size = 100
     test_batch_size = 1
-    embedding_num = 101  # 300
-    hidden_num = 107 # 128  # one direction ; bi-drectional = 2 * hidden
+    embedding_num = 300
+    hidden_num = 128  # one direction ; bi-drectional = 2 * hidden
     bi = True
     lr = 0.001
 
