@@ -14,6 +14,7 @@ from sklearn.metrics import f1_score
 # global:
 REMOVE_O = True
 BI_LSTM_CRF = True
+SHOW_REPORT = True
 
 # https://github.com/luopeixiang/named_entity_recognition/blob/master/data.py
 def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
@@ -377,7 +378,7 @@ def test():
         print([f'{w}_{s}' for w, s in zip(text, prediction)])
 
 def final_test_BiLSTM_CRF(test_dataloader):
-    global char_to_index, model, id_to_tag, device, tag_to_id
+    global char_to_index, model, id_to_tag, device, tag_to_id, id_to_char
     # evaluation
     model.eval()  # F1, acc, recall, F1 score
     # 验证时不做更新
@@ -385,12 +386,17 @@ def final_test_BiLSTM_CRF(test_dataloader):
         # need to recall all of them
         all_pre_test = []
         all_tag_test = []
+        all_char_test = []
 
         # we do it batch by batch
         for test_batch_char_index, test_batch_tag_index, batch_len in test_dataloader:
             pre_tag = model.test(test_batch_char_index, batch_len)
             all_pre_test.extend(pre_tag.detach().cpu().numpy().tolist())
             all_tag_test.extend(test_batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
+            # get characters
+            all_char_test.extend(test_batch_char_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
+            # temp = test_batch_char_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist()
+            # print(temp)
 
 
         # statistics
@@ -408,6 +414,8 @@ def final_test_BiLSTM_CRF(test_dataloader):
                                 if i not in O_tag_indices]
             all_pre_test = [tag for i, tag in enumerate(all_pre_test)
                                  if i not in O_tag_indices]
+            all_char_test = [tag for i, tag in enumerate(all_char_test)
+                                 if i not in O_tag_indices]
             # report
             print("原总标记数为{}，移除了{}个O标记，占比{:.2f}%".format(
                 length_all,
@@ -421,6 +429,22 @@ def final_test_BiLSTM_CRF(test_dataloader):
         # prediction = [id_to_tag[i] for i in model.prediction]
 
         print(f'final_test: f1_score:{test_score:.3f}.)')
+
+        if SHOW_REPORT:  # true
+            # show input character
+            words = [id_to_char[i] for i in all_char_test]
+
+            # show output prediction
+            prediction = [id_to_tag[i] for i in all_pre_test]
+
+            # show output truth
+            ground_truth = [id_to_tag[i] for i in all_tag_test]
+
+            with open('Report/test_result.txt', 'w', encoding='utf-8') as f:
+                for i in range(len(words)):
+                    f.write(words[i] + '\t' + prediction[i] + '\t' + ground_truth[i] + '\n' )
+
+
 
 def final_test_BiLSTM(test_dataloader):
     global char_to_index, model, id_to_tag, device, tag_to_id
@@ -476,6 +500,15 @@ def final_test_BiLSTM(test_dataloader):
         # predicted value
         print([f'{w}_{s}' for w, s in zip(text, prediction)])
 
+def save_model(model):
+    torch.save(model, 'save_model/model.pk1')  # save entire net
+    torch.save(model.state_dict(), 'save_model/model_parameters.pk1')  # save dict
+
+def load_model():
+    model = torch.load('save_model/model.pk1')
+    model.load_state_dict(torch.load('save_model/model_parameters.pk1'))
+    model.eval()
+    return model
 
 
 if __name__ == "__main__":
@@ -490,13 +523,15 @@ if __name__ == "__main__":
 
     # index -> tag
     id_to_tag = [i for i in tag_to_id]
+    # index -> char
+    id_to_char = [i for i in char_to_index]
 
     # total # of char & tags
     char_num = len(char_to_index)
     class_num = len(tag_to_id)
 
     # training setting
-    epoch = 5
+    epoch = 10
     train_batch_size = 10
     dev_batch_size = 100
     test_batch_size = 1
@@ -580,4 +615,12 @@ if __name__ == "__main__":
         final_test_BiLSTM_CRF(test_dataloader)
     else:
         final_test_BiLSTM(test_dataloader)
+
+    # save model
+    save_model(model)
+
+    # load model
+    load_model()
+
+    # manual input
     test()
