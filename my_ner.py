@@ -531,12 +531,12 @@ if __name__ == "__main__":
     class_num = len(tag_to_id)
 
     # training setting
-    epoch = 10
+    epoch = 100
     train_batch_size = 10
     dev_batch_size = 100
     test_batch_size = 1
-    embedding_num = 300
-    hidden_num = 128  # one direction ; bi-drectional = 2 * hidden
+    embedding_num = 400
+    hidden_num = 200  # one direction ; bi-drectional = 2 * hidden
     bi = True
     lr = 0.001
 
