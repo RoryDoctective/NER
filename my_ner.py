@@ -20,7 +20,7 @@ SHOW_REPORT = True
 BI_LSTM_CRF = True
 
 One_Radical = False
-Three_Radicals = True
+Three_Radicals = False
 
 
 # https://github.com/luopeixiang/named_entity_recognition/blob/master/data.py
@@ -136,6 +136,14 @@ def build_one_radical(data_dir='Radical/Unihan_IRGSources.txt'):
         ordered_radical.append(int(id_radical_list[i][1]))
     # this is the id2radical
     return ordered_radical
+
+
+def dummy_radical():
+    global char_to_index
+    dummy = []
+    for i in range(len(char_to_index)):
+        dummy.append(0)
+    return dummy, 0
 
 
 def build_ids(data_dir='Radical/CHISEids.txt'):
@@ -288,12 +296,15 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
         if One_Radical:
             for i in char_index:
                 radical_index.append(self.id2rad[i])
-        if Three_Radicals:
+        elif Three_Radicals:
             for i in char_index:
                 temp = []
                 for j in range(3):
                     temp.append(self.id2rad[i][j])
                 radical_index.append(temp)
+        else:
+            for i in char_index:
+                radical_index.append(self.id2rad[i])
 
         return char_index, tag_index, radical_index
 
@@ -346,7 +357,13 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
                    [torch.tensor(Temp[:,:,0], dtype=torch.int64, device=device),
                     torch.tensor(Temp[:,:,1], dtype=torch.int64, device=device),
                     torch.tensor(Temp[:,:,2], dtype=torch.int64, device=device)]
-
+        else:  # no radicals
+            sentences_radical = [i + [self.id2rad[self.char2id['<PAD>']]] * (batch_max_len - len(i))
+                                 for i in sentences_radical]
+            return torch.tensor(sentences, dtype=torch.int64, device=device), \
+                   torch.tensor(sentences_tag, dtype=torch.int64, device=device), \
+                   batch_lens, \
+                   torch.tensor(sentences_radical, dtype=torch.int64, device=device)
 
 # model = LSTMModel(char_num, embedding_num, hidden_num, class_num, bi)
 class LSTMModel(nn.Module):
@@ -807,7 +824,8 @@ if __name__ == "__main__":
         total_rad_ids = 215
     elif Three_Radicals:
         id_to_radical, total_rad_ids = build_ids(data_dir='Radical/CHISEids.txt')
-
+    else:  # create dummy
+        id_to_radical, total_rad_ids = dummy_radical()
     # training setting
     epoch = 10
     train_batch_size = 10
