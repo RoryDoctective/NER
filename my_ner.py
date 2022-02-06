@@ -11,13 +11,15 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import f1_score
 from operator import itemgetter
+import numpy as np
 
 # global:
 REMOVE_O = False
-BI_LSTM_CRF = True
+BI_LSTM_CRF = False
 SHOW_REPORT = True
 
-One_Radical = True
+One_Radical = False
+Three_Radicals = True
 
 
 # https://github.com/luopeixiang/named_entity_recognition/blob/master/data.py
@@ -39,8 +41,8 @@ def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
                 tag_list.append(tag)
             else:  # line = \n
                 if BI_LSTM_CRF:
-                    char_lists.append(char_list+["<END>"])
-                    tag_lists.append(tag_list+["<END>"])
+                    char_lists.append(char_list + ["<END>"])
+                    tag_lists.append(tag_list + ["<END>"])
                 else:
                     char_lists.append(char_list)
                     tag_lists.append(tag_list)
@@ -49,8 +51,8 @@ def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
 
     # reverse = False == shortest sentences first, longest sentences last
     # when do LSTM-CRF, set it to True
-    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=True)
-    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=True)
+    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=False)
+    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=False)
 
     if make_vocab:  # only for training set
         char2id = build_map(char_lists)
@@ -84,33 +86,32 @@ def build_map(lists):
 def build_one_radical(data_dir='Radical/Unihan_IRGSources.txt'):
     """Read in data"""
     global char_to_index
-    # id_to_one_radical
     char_radical_stroke_list = []
 
     with open(data_dir, 'r', encoding='utf-8') as f:
-        for line in f: # for each line
+        for line in f:  # for each line
             # print(line.strip('\n').split())
             word, attribute, content = line.strip('\n').split()[:3]
             if attribute == "kRSUnicode":
-                char = chr(int(word[2:],16))
+                char = chr(int(word[2:], 16))
                 if "." in content:
                     radical, stroke = content.split(".")
                 else:
                     radical = content
                     stroke = '0'
                 radical = radical.strip("'")
-                char_radical_stroke_list.append([char,radical,stroke])
+                char_radical_stroke_list.append([char, radical, stroke])
     # a = [[list[0], list[2]] for index, list in enumerate(char_radical_stroke_list)]
 
     # get [[id, radical]]
-    id_radical = [ [char_to_index.get(list[0], char_to_index["<UNK>"]),list[1]] for index,list in enumerate(char_radical_stroke_list)]
+    id_radical = [[char_to_index.get(list[0], char_to_index["<UNK>"]), list[1]] for index, list in
+                  enumerate(char_radical_stroke_list)]
 
     # deal with multiple <UNK>
     id_radical_list = []
     for i in range(len(id_radical)):
         if id_radical[i][0] != char_to_index["<UNK>"]:
             id_radical_list.append(id_radical[i])
-
 
     # deal with <UNK, PAD, START>
     id_radical_list.append([char_to_index["<UNK>"], '0'])
@@ -139,18 +140,20 @@ def build_one_radical(data_dir='Radical/Unihan_IRGSources.txt'):
 def build_ids(data_dir='Radical/CHISEids.txt'):
     """
         Read in data
-        id_to_many_radicals -> [id, ’十日‘]
+        id_to_many_radicals -> [id, ’⬚十日‘]
+        'U+0080'*# = padding
+        'itself'*3 = not chinese
     """
-    global char_to_index,id_to_char
+    global char_to_index, id_to_char
 
     # read in
     char_radicals_list = []
     with open(data_dir, 'r', encoding='utf-8') as f:
-        for line in f: # for each line
+        for line in f:  # for each line
             # print(line.strip('\n').split())
             unicode, character, component = line.strip('\n').split()[:3]
             component = component.strip("[]GTJKVH'")
-            char_radicals_list.append([chr(int(unicode[2:],16)), component])
+            char_radicals_list.append([chr(int(unicode[2:], 16)), component])
 
     # get [[id, radicals]]
     id_radicals = [[char_to_index.get(list[0], char_to_index["<UNK>"]), list[1]]
@@ -163,7 +166,7 @@ def build_ids(data_dir='Radical/CHISEids.txt'):
             id_radicals_list.append(id_radicals[i])
 
     # deal with <UNK, PAD, START> using 0 as unknow
-    id_radicals_list.append([char_to_index["<UNK>"], ''])
+    id_radicals_list.append([char_to_index["<UNK>"], chr(int('0080', 16)) * 3])
 
     # sort by index
     id_radicals_list = sorted(id_radicals_list, key=itemgetter(0))
@@ -172,10 +175,10 @@ def build_ids(data_dir='Radical/CHISEids.txt'):
     for i in range(len(char_to_index)):
         if len(id_radicals_list) > i:
             if id_radicals_list[i][0] != i:
-                id_radicals_list.append([i,id_to_char[i] ])
+                id_radicals_list.append([i, id_to_char[i] * 3])
                 id_radicals_list = sorted(id_radicals_list, key=itemgetter(0))
         else:
-            id_radicals_list.append([i, id_to_char[i]])
+            id_radicals_list.append([i, id_to_char[i] * 3])
             id_radicals_list = sorted(id_radicals_list, key=itemgetter(0))
 
     # get only the radical, and make the map
@@ -185,23 +188,85 @@ def build_ids(data_dir='Radical/CHISEids.txt'):
 
     # deal with PAD, START
     if ordered_radicals[-1] == '<START>':
-        ordered_radicals[-1] = ''
+        ordered_radicals[-1] = chr(int('0080', 16)) * 3
     if ordered_radicals[-1] == '<PAD>':
-        ordered_radicals[-1] = ''
+        ordered_radicals[-1] = chr(int('0080', 16)) * 3
 
-    # this is the id2radicals
-    return ordered_radicals
+    # Aiming at 1 ⬚ + 2 radicals:
+    formal_radicals = []
+    for i in range(len(ordered_radicals)):
+        radical_list = ordered_radicals[i]
+
+        # means it is not a chinese character/ it is a padding
+        if len(radical_list) == 3:
+            if radical_list[0] == radical_list[1] and radical_list[1] == radical_list[2]:
+                formal_radicals.append(radical_list)
+                continue
+
+        # finding the first idc, add it
+        # finding the first 2 dc, add it
+        idc = 0
+        dc = 0
+        temp_idc = []
+        temp_dc = []
+        for j in range(len(radical_list)):
+            if is_idc(radical_list[j]) and idc < 1:
+                temp_idc.append(radical_list[j])
+                idc += 1
+            elif not is_idc(radical_list[j]) and dc < 2:
+                temp_dc.append(radical_list[j])
+                dc += 1
+        if len(temp_idc) < 1:
+            temp_idc.append('⬚')
+        if len(temp_dc) == 1:
+            temp_dc.append(temp_dc[0])
+        elif len(temp_dc) == 0:
+            temp_dc.append(chr(int('0080', 16)))
+            temp_dc.append(chr(int('0080', 16)))
+        temp_idc.extend(temp_dc)
+        formal_radicals.append(temp_idc)
+
+    # get all the possible components:
+    all_rad = []
+    for i in range(len(formal_radicals)):
+        for j in range(3):
+            if formal_radicals[i][j] not in all_rad:
+                all_rad.append(formal_radicals[i][j])
+
+    # radical 2 radical ids
+    rad3toradid = build_map(all_rad)
+
+    finnal_id_to_id = []
+    for i in range(len(formal_radicals)):
+        temp = []
+        for j in range(3):
+            temp.append(rad3toradid[formal_radicals[i][j]])
+        finnal_id_to_id.append(temp)
+    return finnal_id_to_id, len(rad3toradid)
+
+
+def is_idc(text):
+    """
+    Return True if between "⿰"(U + 2FF0) to"⿻"(U + 2FFB)
+    """
+    low = int('2FF0', 16)
+    up = int('2FFB', 16)
+    text = ord(text)
+    if low <= text <= up:
+        return True
+    else:
+        return False
 
 
 class MyDataset(Dataset):  # Inherit the torch Dataset
     # 汉字，标签
-    def __init__(self, data, tag, char2id, tag2id, id2onerad):
+    def __init__(self, data, tag, char2id, tag2id, id2rad):
         # char to index/ 汉字变数字
         self.data = data
         self.tag = tag
         self.char2id = char2id
         self.tag2id = tag2id
-        self.id2onerad = id2onerad
+        self.id2rad = id2rad
 
     def __getitem__(self, index):
         # get one sentence
@@ -218,13 +283,18 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
             else:  # if not in the look up table, it is unknown.
                 char_index.append(self.char2id['<UNK>'])
 
-        one_radical_index = []
-        if One_Radical is True:
+        radical_index = []
+        if One_Radical:
             for i in char_index:
-                one_radical_index.append(self.id2onerad[i])
+                radical_index.append(self.id2rad[i])
+        if Three_Radicals:
+            for i in char_index:
+                temp = []
+                for j in range(3):
+                    temp.append(self.id2rad[i][j])
+                radical_index.append(temp)
 
-        return char_index, tag_index, one_radical_index
-
+        return char_index, tag_index, radical_index
 
     def __len__(self):
         # one char -> one tag
@@ -251,27 +321,44 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
         # add padding
         sentences = [i + [self.char2id['<PAD>']] * (batch_max_len - len(i)) for i in sentences]
         sentences_tag = [i + [self.tag2id['<PAD>']] * (batch_max_len - len(i)) for i in sentences_tag]
+
         if One_Radical:
-            sentences_radical = [i + [self.id2onerad[self.char2id['<PAD>']]] * (batch_max_len - len(i))
-                                for i in sentences_radical]
+            sentences_radical = [i + [self.id2rad[self.char2id['<PAD>']]] * (batch_max_len - len(i))
+                                 for i in sentences_radical]
+            # return tensor
+            return torch.tensor(sentences, dtype=torch.int64, device=device), \
+                   torch.tensor(sentences_tag, dtype=torch.int64, device=device), \
+                   batch_lens, \
+                   torch.tensor(sentences_radical, dtype=torch.int64, device=device)
 
-        # return tensor
-        return torch.tensor(sentences, dtype=torch.int64, device=device), \
-               torch.tensor(sentences_tag, dtype=torch.int64, device=device), \
-               batch_lens, \
-               torch.tensor(sentences_radical, dtype=torch.int64, device=device)
-
+        elif Three_Radicals:
+            sentences_radical = [i + [self.id2rad[self.char2id['<PAD>']]] * (batch_max_len - len(i))
+                                 for i in sentences_radical]
+            # separate those 3
+            Temp = np.array(sentences_radical)
+            a, b = Temp[:, :, 0].shape
+            # Temp[:,:,0].reshape((a,b,1)
+            # return tensor
+            return torch.tensor(sentences, dtype=torch.int64, device=device), \
+                   torch.tensor(sentences_tag, dtype=torch.int64, device=device), \
+                   batch_lens, \
+                   [torch.tensor(Temp[:,:,0], dtype=torch.int64, device=device),
+                    torch.tensor(Temp[:,:,1], dtype=torch.int64, device=device),
+                    torch.tensor(Temp[:,:,2], dtype=torch.int64, device=device)]
 
 # model = LSTMModel(char_num, embedding_num, hidden_num, class_num, bi)
 class LSTMModel(nn.Module):
     # 多少个不重复的汉字， 多少个embedding，LSTM隐藏大小， 分类类别， 双向
-    def __init__(self, char_num, embedding_num, hidden_num, class_num, bi=True):
+    def __init__(self, char_num, embedding_num, total_rad_ids, hidden_num, class_num, bi=True):
         super().__init__()
         self.embedding = nn.Embedding(char_num, embedding_num)
         if One_Radical:
-            self.one_radical_embedding = nn.Embedding(215, 10)
+            self.one_radical_embedding = nn.Embedding(total_rad_ids, 50)
             # 一层， batch在前面
-            self.lstm = nn.LSTM(embedding_num+10, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+            self.lstm = nn.LSTM(embedding_num + 50, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+        elif Three_Radicals:
+            self.one_radical_embedding = nn.Embedding(total_rad_ids, 100)
+            self.lstm = nn.LSTM(embedding_num + 100*3, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
         else:
             self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
 
@@ -282,13 +369,19 @@ class LSTMModel(nn.Module):
 
         self.cross_loss = nn.CrossEntropyLoss()  # it contains softmax inside
 
-    def forward(self, batch_char_index,batch_onerad_index, batch_tag_index=None ):
+    def forward(self, batch_char_index, batch_onerad_index, batch_tag_index=None):
         if One_Radical:
             # if returns [5,4,101] means 5 batches, each batch 4 char, each char 101 dim represent.
             embedding_char = self.embedding(batch_char_index)  # get character embedding
             embedding_onerad = self.one_radical_embedding(batch_onerad_index)  # get radical embedding
             embedding = torch.cat([embedding_char, embedding_onerad], 2)
-        else: # normal
+        elif Three_Radicals:
+            embedding_char = self.embedding(batch_char_index)  # get character embedding
+            embedding_onerad_0 = self.one_radical_embedding(batch_onerad_index[0])  # get radical embedding
+            embedding_onerad_1 = self.one_radical_embedding(batch_onerad_index[1])
+            embedding_onerad_2 = self.one_radical_embedding(batch_onerad_index[2])
+            embedding = torch.cat([embedding_char, embedding_onerad_0, embedding_onerad_1, embedding_onerad_2], 2)
+        else:  # normal
             embedding = self.embedding(batch_char_index)
 
         # out = 每一个字的结果 = [5,4,214] = 5 batches, each batch 4 char, each char 214 hidden
@@ -323,7 +416,7 @@ class LSTM_CRF_Model(nn.Module):
             self.one_radical_embedding = nn.Embedding(215, 10)
             # 一层， batch在前面
             self.lstm = nn.LSTM(embedding_num + 10, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
-        else: # no radical
+        else:  # no radical
             # 一层， batch在前面
             self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
 
@@ -335,10 +428,10 @@ class LSTM_CRF_Model(nn.Module):
         # here comes the difference:
         # A kind of Tensor that is to be considered a module parameter
         # eg: if class_num = 4, then nn.Parameter() =
-            # tensor([[0.2500, 0.2500, 0.2500, 0.2500],
-            #         [0.2500, 0.2500, 0.2500, 0.2500],
-            #         [0.2500, 0.2500, 0.2500, 0.2500],
-            #         [0.2500, 0.2500, 0.2500, 0.2500]])
+        # tensor([[0.2500, 0.2500, 0.2500, 0.2500],
+        #         [0.2500, 0.2500, 0.2500, 0.2500],
+        #         [0.2500, 0.2500, 0.2500, 0.2500],
+        #         [0.2500, 0.2500, 0.2500, 0.2500]])
         self.transition = nn.Parameter(torch.ones(class_num, class_num) * 1 / class_num)
 
         # This need to be self_defined.
@@ -369,7 +462,7 @@ class LSTM_CRF_Model(nn.Module):
         targets = targets.masked_select(mask)  # [real_L]
 
         flatten_scores = crf_scores.masked_select(mask.view(batch_size, max_len, 1, 1).expand_as(crf_scores)).view(-1,
-                                                                            target_size * target_size).contiguous()
+                                                                                                                   target_size * target_size).contiguous()
 
         golden_scores = flatten_scores.gather(dim=1, index=targets.unsqueeze(1)).sum()
 
@@ -389,7 +482,7 @@ class LSTM_CRF_Model(nn.Module):
             # 当前时刻 有效的batch_size（因为有些序列比较短)
             batch_size_t = (lengths > t).sum().item()
             if t == 0:
-                scores_upto_t[:batch_size_t] = crf_scores[:batch_size_t,t, start_id, :]
+                scores_upto_t[:batch_size_t] = crf_scores[:batch_size_t, t, start_id, :]
             else:
                 # We add scores at current timestep to scores accumulated up to previous
                 # timestep, and log-sum-exp Remember, the cur_tag of the previous
@@ -416,7 +509,6 @@ class LSTM_CRF_Model(nn.Module):
         targets[:, 0] += (start_id * tagset_size)
         return targets
 
-
     def forward(self, batch_data, batch_onerad, batch_tag=None):
         embedding = self.embedding(batch_data)
         if One_Radical:
@@ -424,9 +516,9 @@ class LSTM_CRF_Model(nn.Module):
             embedding_char = self.embedding(batch_data)  # get character embedding
             embedding_onerad = self.one_radical_embedding(batch_onerad)  # get radical embedding
             embedding = torch.cat([embedding_char, embedding_onerad], 2)
-        else: # normal
+        else:  # normal
             embedding = self.embedding(batch_data)
-        out,_ = self.lstm(embedding)
+        out, _ = self.lstm(embedding)
 
         emission = self.classifier(out)
         batch_size, max_len, out_size = emission.size()
@@ -439,7 +531,7 @@ class LSTM_CRF_Model(nn.Module):
         else:
             return crf_scores
 
-    def test(self, test_sents_tensor, test_onerad_tensor ,lengths):
+    def test(self, test_sents_tensor, test_onerad_tensor, lengths):
         """使用维特比算法进行解码"""
         global tag_to_id
         start_id = tag_to_id['<START>']
@@ -462,12 +554,12 @@ class LSTM_CRF_Model(nn.Module):
             if step == 0:
                 # 第一个字它的前一个标记只能是start_id
                 viterbi[:batch_size_t, step,
-                        :] = crf_scores[: batch_size_t, step, start_id, :]
+                :] = crf_scores[: batch_size_t, step, start_id, :]
                 backpointer[: batch_size_t, step, :] = start_id
             else:
                 max_scores, prev_tags = torch.max(
-                    viterbi[:batch_size_t, step-1, :].unsqueeze(2) +
-                    crf_scores[:batch_size_t, step, :, :],     # [B, T, T]
+                    viterbi[:batch_size_t, step - 1, :].unsqueeze(2) +
+                    crf_scores[:batch_size_t, step, :, :],  # [B, T, T]
                     dim=1
                 )
                 viterbi[:batch_size_t, step, :] = max_scores
@@ -477,9 +569,9 @@ class LSTM_CRF_Model(nn.Module):
         backpointer = backpointer.view(B, -1)  # [B, L * T]
         tagids = []  # 存放结果
         tags_t = None
-        for step in range(L-1, 0, -1):
+        for step in range(L - 1, 0, -1):
             batch_size_t = (lengths > step).sum().item()
-            if step == L-1:
+            if step == L - 1:
                 index = torch.ones(batch_size_t).long() * (step * tagset_size)
                 index = index.to(device)
                 index += end_id
@@ -530,6 +622,7 @@ def test():
 
         print([f'{w}_{s}' for w, s in zip(text, prediction)])
 
+
 def final_test_BiLSTM_CRF(test_dataloader):
     global char_to_index, model, id_to_tag, device, tag_to_id, id_to_char
     # evaluation
@@ -551,7 +644,6 @@ def final_test_BiLSTM_CRF(test_dataloader):
             # temp = test_batch_char_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist()
             # print(temp)
 
-
         # statistics
         length_all = len(all_tag_test)
 
@@ -561,14 +653,14 @@ def final_test_BiLSTM_CRF(test_dataloader):
             O_id = tag_to_id['O']
             # find all O
             O_tag_indices = [i for i in range(length_all)
-                            if all_tag_test[i] == O_id]
+                             if all_tag_test[i] == O_id]
             # get rid of Os
             all_tag_test = [tag for i, tag in enumerate(all_tag_test)
-                                if i not in O_tag_indices]
+                            if i not in O_tag_indices]
             all_pre_test = [tag for i, tag in enumerate(all_pre_test)
-                                 if i not in O_tag_indices]
+                            if i not in O_tag_indices]
             all_char_test = [tag for i, tag in enumerate(all_char_test)
-                                 if i not in O_tag_indices]
+                             if i not in O_tag_indices]
             # report
             print("原总标记数为{}，移除了{}个O标记，占比{:.2f}%".format(
                 length_all,
@@ -595,7 +687,7 @@ def final_test_BiLSTM_CRF(test_dataloader):
 
             with open('Report/test_result.txt', 'w', encoding='utf-8') as f:
                 for i in range(len(words)):
-                    f.write(words[i] + '\t' + prediction[i] + '\t' + ground_truth[i] + '\n' )
+                    f.write(words[i] + '\t' + prediction[i] + '\t' + ground_truth[i] + '\n')
 
 
 def final_test_BiLSTM(test_dataloader):
@@ -629,12 +721,12 @@ def final_test_BiLSTM(test_dataloader):
             O_id = tag_to_id['O']
             # find all O
             O_tag_indices = [i for i in range(length_all)
-                            if all_tag_test[i] == O_id]
+                             if all_tag_test[i] == O_id]
             # get rid of Os
             all_tag_test = [tag for i, tag in enumerate(all_tag_test)
-                                if i not in O_tag_indices]
+                            if i not in O_tag_indices]
             all_pre_test = [tag for i, tag in enumerate(all_pre_test)
-                                 if i not in O_tag_indices]
+                            if i not in O_tag_indices]
             all_char_test = [tag for i, tag in enumerate(all_char_test)
                              if i not in O_tag_indices]
             # report
@@ -664,12 +756,13 @@ def final_test_BiLSTM(test_dataloader):
 
             with open('Report/test_result.txt', 'w', encoding='utf-8') as f:
                 for i in range(len(words)):
-                    f.write(words[i] + '\t' + prediction[i] + '\t' + ground_truth[i] + '\n' )
+                    f.write(words[i] + '\t' + prediction[i] + '\t' + ground_truth[i] + '\n')
 
 
 def save_model(model):
     torch.save(model, 'save_model/model.pk1')  # save entire net
     torch.save(model.state_dict(), 'save_model/model_parameters.pk1')  # save dict
+
 
 def load_model():
     model = torch.load('save_model/model.pk1')
@@ -698,15 +791,18 @@ if __name__ == "__main__":
     class_num = len(tag_to_id)
 
     # load-in the radicals
-    id_to_one_radical = build_one_radical(data_dir='Radical/Unihan_IRGSources.txt')
-    id_to_ids = build_ids(data_dir='Radical/CHISEids.txt')
+    if One_Radical:
+        id_to_radical = build_one_radical(data_dir='Radical/Unihan_IRGSources.txt')
+        total_rad_ids = 215
+    elif Three_Radicals:
+        id_to_radical, total_rad_ids = build_ids(data_dir='Radical/CHISEids.txt')
 
     # training setting
     epoch = 10
     train_batch_size = 10
     dev_batch_size = 100
     test_batch_size = 1
-    embedding_num = 300
+    embedding_num = 200
     hidden_num = 200  # one direction ; bi-drectional = 2 * hidden
     bi = True
     lr = 0.001
@@ -714,26 +810,26 @@ if __name__ == "__main__":
     # get dataset
     # no shuffle ordered by the len of sentence
     # need to add padding, thus use self-defined collate_fn function
-    train_dataset = MyDataset(train_data, train_tag, char_to_index, tag_to_id, id_to_one_radical)
+    train_dataset = MyDataset(train_data, train_tag, char_to_index, tag_to_id, id_to_radical)
     train_dataloader = DataLoader(train_dataset, train_batch_size, shuffle=False,
                                   collate_fn=train_dataset.pro_batch_data)
 
     # evaluation
-    dev_dataset = MyDataset(dev_data, dev_tag, char_to_index, tag_to_id, id_to_one_radical)
+    dev_dataset = MyDataset(dev_data, dev_tag, char_to_index, tag_to_id, id_to_radical)
     dev_dataloader = DataLoader(dev_dataset, dev_batch_size, shuffle=False,
                                 collate_fn=dev_dataset.pro_batch_data)
 
     # test data
-    test_dataset = MyDataset(test_data, test_tag, char_to_index, tag_to_id, id_to_one_radical)
+    test_dataset = MyDataset(test_data, test_tag, char_to_index, tag_to_id, id_to_radical)
     test_dataloader = DataLoader(test_dataset, test_batch_size, shuffle=False,
-                                collate_fn=test_dataset.pro_batch_data)
+                                 collate_fn=test_dataset.pro_batch_data)
 
     # SETTING
     if BI_LSTM_CRF:
-        model = LSTM_CRF_Model(char_num, embedding_num, hidden_num, class_num, bi)
+        model = LSTM_CRF_Model(char_num, embedding_num,total_rad_ids, hidden_num, class_num, bi)
         opt = torch.optim.AdamW(model.parameters(), lr=lr)  # Adam/AdamW
     else:
-        model = LSTMModel(char_num, embedding_num, hidden_num, class_num, bi)
+        model = LSTMModel(char_num, embedding_num,total_rad_ids, hidden_num, class_num, bi)
         opt = torch.optim.Adam(model.parameters(), lr=lr)  # Adam/AdamW
     model = model.to(device)
 
@@ -761,7 +857,7 @@ if __name__ == "__main__":
             for dev_batch_char_index, dev_batch_tag_index, batch_len, dev_batch_onerad_index in dev_dataloader:
                 if BI_LSTM_CRF:
                     # using model.test
-                    pre_tag = model.test(dev_batch_char_index, dev_batch_onerad_index,batch_len)
+                    pre_tag = model.test(dev_batch_char_index, dev_batch_onerad_index, batch_len)
                     all_pre.extend(pre_tag.detach().cpu().numpy().tolist())
                     all_tag.extend(dev_batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
 
