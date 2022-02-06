@@ -17,7 +17,7 @@ REMOVE_O = False
 BI_LSTM_CRF = False
 SHOW_REPORT = True
 
-One_Radical = False
+One_Radical = True
 
 # https://github.com/luopeixiang/named_entity_recognition/blob/master/data.py
 def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
@@ -47,8 +47,9 @@ def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
                 tag_list = []
 
     # reverse = False == shortest sentences first, longest sentences last
-    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=True)
-    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=True)
+    # when do LSTM-CRF, set it to True
+    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=False)
+    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=False)
 
     if make_vocab:  # only for training set
         char2id = build_map(char_lists)
@@ -129,7 +130,7 @@ def build_one_radical(data_dir='Radical/Unihan_IRGSources.txt'):
     # get only the radical, and make the map
     ordered_radical = []
     for i in range(len(id_radical_list)):
-        ordered_radical.append(id_radical_list[i][1])
+        ordered_radical.append(int(id_radical_list[i][1]))
     # this is the id2radical
     return ordered_radical
 
@@ -193,12 +194,13 @@ def build_ids(data_dir='Radical/CHISEids.txt'):
 
 class MyDataset(Dataset):  # Inherit the torch Dataset
     # 汉字，标签
-    def __init__(self, data, tag, char2id, tag2id):
+    def __init__(self, data, tag, char2id, tag2id, id2onerad):
         # char to index/ 汉字变数字
         self.data = data
         self.tag = tag
         self.char2id = char2id
         self.tag2id = tag2id
+        self.id2onerad = id2onerad
 
     def __getitem__(self, index):
         # get one sentence
@@ -215,7 +217,13 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
             else:  # if not in the look up table, it is unknown.
                 char_index.append(self.char2id['<UNK>'])
 
-        return char_index, tag_index
+        one_radical_index = []
+        if One_Radical is True:
+            for i in char_index:
+                one_radical_index.append(self.id2onerad[i])
+
+        return char_index, tag_index, one_radical_index
+
 
     def __len__(self):
         # one char -> one tag
@@ -230,20 +238,26 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
         sentences = []
         sentences_tag = []
         batch_lens = []
+        sentences_radical = []
 
-        for sentence, sentence_tag in batch_data:
+        for sentence, sentence_tag, sentence_radical in batch_data:
             sentences.append(sentence)
             sentences_tag.append(sentence_tag)
+            sentences_radical.append(sentence_radical)
             batch_lens.append(len(sentence))
         batch_max_len = max(batch_lens)
 
         # add padding
         sentences = [i + [self.char2id['<PAD>']] * (batch_max_len - len(i)) for i in sentences]
         sentences_tag = [i + [self.tag2id['<PAD>']] * (batch_max_len - len(i)) for i in sentences_tag]
+        sentences_radical = [i + [self.id2onerad[self.char2id['<PAD>']]] * (batch_max_len - len(i))
+                             for i in sentences_radical]
 
         # return tensor
-        return torch.tensor(sentences, dtype=torch.int64, device=device), torch.tensor(sentences_tag, dtype=torch.int64,
-                                                                                       device=device), batch_lens
+        return torch.tensor(sentences, dtype=torch.int64, device=device), \
+               torch.tensor(sentences_tag, dtype=torch.int64, device=device), \
+               batch_lens, \
+               torch.tensor(sentences_radical, dtype=torch.int64, device=device)
 
 
 # model = LSTMModel(char_num, embedding_num, hidden_num, class_num, bi)
@@ -252,8 +266,9 @@ class LSTMModel(nn.Module):
     def __init__(self, char_num, embedding_num, hidden_num, class_num, bi=True):
         super().__init__()
         self.embedding = nn.Embedding(char_num, embedding_num)
+        self.one_radical_embedding = nn.Embedding(215, 10)
         # 一层， batch在前面
-        self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+        self.lstm = nn.LSTM(embedding_num+10, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
 
         if bi:  # 双向：hidden# * 2
             self.classifier = nn.Linear(hidden_num * 2, class_num)
@@ -262,12 +277,18 @@ class LSTMModel(nn.Module):
 
         self.cross_loss = nn.CrossEntropyLoss()  # it contains softmax inside
 
-    def forward(self, batch_char_index, batch_tag_index=None):
+    def forward(self, batch_char_index,batch_onerad_index, batch_tag_index=None ):
         # if returns [5,4,101] means 5 batches, each batch 4 char, each char 101 dim represent.
-        embedding = self.embedding(batch_char_index)  # get character embedding
+        embedding_char = self.embedding(batch_char_index)  # get character embedding
+        embedding_onerad = self.one_radical_embedding(batch_onerad_index)  # get radical embedding
+        embedding = torch.cat([embedding_char, embedding_onerad], 2)
 
         if One_Radical:
             # prepare the radical TODO
+            # for i in range(batch_char_index.shape(2):
+            #     index = batch_char_index[:, :, i]
+            #     radical = id_to_one_radical[index]
+            # x = batch_char_index[:, :-1])
             pass
             # embedding + radical
             # NOTE:
@@ -582,15 +603,18 @@ def final_test_BiLSTM(test_dataloader):
         # need to recall all of them
         all_pre_test = []
         all_tag_test = []
+        all_char_test = []
 
         # we do it batch by batch
-        for test_batch_char_index, test_batch_tag_index, batch_len in test_dataloader:
+        for test_batch_char_index, test_batch_tag_index, batch_len, test_batch_onerad_index in test_dataloader:
             # loss
-            test_loss = model.forward(test_batch_char_index, test_batch_tag_index)
+            test_loss = model.forward(test_batch_char_index, test_batch_onerad_index, test_batch_tag_index)
             # score
             all_pre_test.extend(model.prediction.cpu().numpy().tolist())
             # reshape(-1): 一句话里面很多字，全部拉平
             all_tag_test.extend(test_batch_tag_index.cpu().numpy().reshape(-1).tolist())
+            # get characters
+            all_char_test.extend(test_batch_char_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
 
         # statistics
         length_all = len(all_tag_test)
@@ -607,6 +631,8 @@ def final_test_BiLSTM(test_dataloader):
                                 if i not in O_tag_indices]
             all_pre_test = [tag for i, tag in enumerate(all_pre_test)
                                  if i not in O_tag_indices]
+            all_char_test = [tag for i, tag in enumerate(all_char_test)
+                             if i not in O_tag_indices]
             # report
             print("原总标记数为{}，移除了{}个O标记，占比{:.2f}%".format(
                 length_all,
@@ -622,10 +648,19 @@ def final_test_BiLSTM(test_dataloader):
         print(f'final_test: f1_score:{test_score:.3f}, test_loss:{test_loss:.3f}')
 
         # human readable presentations
-        # input
-        # true value
-        # predicted value
-        print([f'{w}_{s}' for w, s in zip(text, prediction)])
+        if SHOW_REPORT:  # true
+            # show input character
+            words = [id_to_char[i] for i in all_char_test]
+
+            # show output prediction
+            prediction = [id_to_tag[i] for i in all_pre_test]
+
+            # show output truth
+            ground_truth = [id_to_tag[i] for i in all_tag_test]
+
+            with open('Report/test_result.txt', 'w', encoding='utf-8') as f:
+                for i in range(len(words)):
+                    f.write(words[i] + '\t' + prediction[i] + '\t' + ground_truth[i] + '\n' )
 
 
 def save_model(model):
@@ -663,7 +698,7 @@ if __name__ == "__main__":
     id_to_ids = build_ids(data_dir='Radical/CHISEids.txt')
 
     # training setting
-    epoch = 100
+    epoch = 10
     train_batch_size = 10
     dev_batch_size = 100
     test_batch_size = 1
@@ -675,17 +710,17 @@ if __name__ == "__main__":
     # get dataset
     # no shuffle ordered by the len of sentence
     # need to add padding, thus use self-defined collate_fn function
-    train_dataset = MyDataset(train_data, train_tag, char_to_index, tag_to_id)
+    train_dataset = MyDataset(train_data, train_tag, char_to_index, tag_to_id, id_to_one_radical)
     train_dataloader = DataLoader(train_dataset, train_batch_size, shuffle=False,
                                   collate_fn=train_dataset.pro_batch_data)
 
     # evaluation
-    dev_dataset = MyDataset(dev_data, dev_tag, char_to_index, tag_to_id)
+    dev_dataset = MyDataset(dev_data, dev_tag, char_to_index, tag_to_id, id_to_one_radical)
     dev_dataloader = DataLoader(dev_dataset, dev_batch_size, shuffle=False,
                                 collate_fn=dev_dataset.pro_batch_data)
 
     # test data
-    test_dataset = MyDataset(test_data, test_tag, char_to_index, tag_to_id)
+    test_dataset = MyDataset(test_data, test_tag, char_to_index, tag_to_id, id_to_one_radical)
     test_dataloader = DataLoader(test_dataset, test_batch_size, shuffle=False,
                                 collate_fn=test_dataset.pro_batch_data)
 
@@ -702,9 +737,9 @@ if __name__ == "__main__":
     for e in range(epoch):
         # train
         model.train()
-        for batch_char_index, batch_tag_index, batch_len in train_dataloader:
+        for batch_char_index, batch_tag_index, batch_len, batch_onerad_index in train_dataloader:
             # both of them already in cuda
-            train_loss = model.forward(batch_char_index, batch_tag_index)
+            train_loss = model.forward(batch_char_index, batch_onerad_index, batch_tag_index)
             train_loss.backward()
             opt.step()
             opt.zero_grad()
@@ -719,7 +754,7 @@ if __name__ == "__main__":
             all_tag = []
 
             # we do it batch by batch
-            for dev_batch_char_index, dev_batch_tag_index, batch_len in dev_dataloader:
+            for dev_batch_char_index, dev_batch_tag_index, batch_len, dev_batch_onerad_index in dev_dataloader:
                 if BI_LSTM_CRF:
                     # using model.test
                     pre_tag = model.test(dev_batch_char_index, batch_len)
@@ -731,7 +766,7 @@ if __name__ == "__main__":
 
                 else:  # LSTM
                     # loss
-                    dev_loss = model.forward(dev_batch_char_index, dev_batch_tag_index)
+                    dev_loss = model.forward(dev_batch_char_index, dev_batch_onerad_index, dev_batch_tag_index)
                     # score
                     all_pre.extend(model.prediction.detach().cpu().numpy().tolist())
                     # reshape(-1): 一句话里面很多字，全部拉平
