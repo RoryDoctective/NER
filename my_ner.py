@@ -10,11 +10,14 @@ from torch.utils.data import Dataset, DataLoader
 import torch
 import torch.nn as nn
 from sklearn.metrics import f1_score
+from operator import itemgetter
 
 # global:
-REMOVE_O = True
-BI_LSTM_CRF = True
+REMOVE_O = False
+BI_LSTM_CRF = False
 SHOW_REPORT = True
+
+One_Radical = False
 
 # https://github.com/luopeixiang/named_entity_recognition/blob/master/data.py
 def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
@@ -76,6 +79,118 @@ def build_map(lists):
     return maps
 
 
+def build_one_radical(data_dir='Radical/Unihan_IRGSources.txt'):
+    """Read in data"""
+    global char_to_index
+    # id_to_one_radical
+    char_radical_stroke_list = []
+
+    with open(data_dir, 'r', encoding='utf-8') as f:
+        for line in f: # for each line
+            # print(line.strip('\n').split())
+            word, attribute, content = line.strip('\n').split()[:3]
+            if attribute == "kRSUnicode":
+                char = chr(int(word[2:],16))
+                if "." in content:
+                    radical, stroke = content.split(".")
+                else:
+                    radical = content
+                    stroke = '0'
+                radical = radical.strip("'")
+                char_radical_stroke_list.append([char,radical,stroke])
+    # a = [[list[0], list[2]] for index, list in enumerate(char_radical_stroke_list)]
+
+    # get [[id, radical]]
+    id_radical = [ [char_to_index.get(list[0], char_to_index["<UNK>"]),list[1]] for index,list in enumerate(char_radical_stroke_list)]
+
+    # deal with multiple <UNK>
+    id_radical_list = []
+    for i in range(len(id_radical)):
+        if id_radical[i][0] != char_to_index["<UNK>"]:
+            id_radical_list.append(id_radical[i])
+
+
+    # deal with <UNK, PAD, START>
+    id_radical_list.append([char_to_index["<UNK>"], '0'])
+
+    # sort by index
+    id_radical_list = sorted(id_radical_list, key=itemgetter(0))
+
+    # add 0 as the radical for things not a chinese character
+    for i in range(len(char_to_index)):
+        if len(id_radical_list) > i:
+            if id_radical_list[i][0] != i:
+                id_radical_list.append([i, '0'])
+                id_radical_list = sorted(id_radical_list, key=itemgetter(0))
+        else:
+            id_radical_list.append([i, '0'])
+            id_radical_list = sorted(id_radical_list, key=itemgetter(0))
+
+    # get only the radical, and make the map
+    ordered_radical = []
+    for i in range(len(id_radical_list)):
+        ordered_radical.append(id_radical_list[i][1])
+    # this is the id2radical
+    return ordered_radical
+
+
+def build_ids(data_dir='Radical/CHISEids.txt'):
+    """
+        Read in data
+        id_to_many_radicals -> [id, ’十日‘]
+    """
+    global char_to_index,id_to_char
+
+    # read in
+    char_radicals_list = []
+    with open(data_dir, 'r', encoding='utf-8') as f:
+        for line in f: # for each line
+            # print(line.strip('\n').split())
+            unicode, character, component = line.strip('\n').split()[:3]
+            component = component.strip("[]GTJKVH'")
+            char_radicals_list.append([chr(int(unicode[2:],16)), component])
+
+    # get [[id, radicals]]
+    id_radicals = [[char_to_index.get(list[0], char_to_index["<UNK>"]), list[1]]
+                   for index, list in enumerate(char_radicals_list)]
+
+    # deal with multiple <UNK>
+    id_radicals_list = []
+    for i in range(len(id_radicals)):
+        if id_radicals[i][0] != char_to_index["<UNK>"]:
+            id_radicals_list.append(id_radicals[i])
+
+    # deal with <UNK, PAD, START> using 0 as unknow
+    id_radicals_list.append([char_to_index["<UNK>"], ''])
+
+    # sort by index
+    id_radicals_list = sorted(id_radicals_list, key=itemgetter(0))
+
+    # add 'itself' as the radical for things not a chinese character
+    for i in range(len(char_to_index)):
+        if len(id_radicals_list) > i:
+            if id_radicals_list[i][0] != i:
+                id_radicals_list.append([i,id_to_char[i] ])
+                id_radicals_list = sorted(id_radicals_list, key=itemgetter(0))
+        else:
+            id_radicals_list.append([i, id_to_char[i]])
+            id_radicals_list = sorted(id_radicals_list, key=itemgetter(0))
+
+    # get only the radical, and make the map
+    ordered_radicals = []
+    for i in range(len(id_radicals_list)):
+        ordered_radicals.append(id_radicals_list[i][1])
+
+    # deal with PAD, START
+    if ordered_radicals[-1] == '<START>':
+        ordered_radicals[-1] = ''
+    if ordered_radicals[-1] == '<PAD>':
+        ordered_radicals[-1] = ''
+
+    # this is the id2radicals
+    return ordered_radicals
+
+
 class MyDataset(Dataset):  # Inherit the torch Dataset
     # 汉字，标签
     def __init__(self, data, tag, char2id, tag2id):
@@ -130,13 +245,12 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
         return torch.tensor(sentences, dtype=torch.int64, device=device), torch.tensor(sentences_tag, dtype=torch.int64,
                                                                                        device=device), batch_lens
 
+
 # model = LSTMModel(char_num, embedding_num, hidden_num, class_num, bi)
 class LSTMModel(nn.Module):
     # 多少个不重复的汉字， 多少个embedding，LSTM隐藏大小， 分类类别， 双向
     def __init__(self, char_num, embedding_num, hidden_num, class_num, bi=True):
         super().__init__()
-
-        # 每一个汉字 + 一个embedding长度 = embedding
         self.embedding = nn.Embedding(char_num, embedding_num)
         # 一层， batch在前面
         self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
@@ -150,7 +264,20 @@ class LSTMModel(nn.Module):
 
     def forward(self, batch_char_index, batch_tag_index=None):
         # if returns [5,4,101] means 5 batches, each batch 4 char, each char 101 dim represent.
-        embedding = self.embedding(batch_char_index)  # get embedding
+        embedding = self.embedding(batch_char_index)  # get character embedding
+
+        if One_Radical:
+            # prepare the radical TODO
+            pass
+            # embedding + radical
+            # NOTE:
+            # embeds has a shape of (batch_size, each batch 4 char, embed_dim)
+            # inorder to merge this change this with x, reshape this to
+            # (batch_size, embed_dim)
+
+
+            # x = torch.cat((x, embeds.view(x.shape)), dim=1)
+
         # out = 每一个字的结果 = [5,4,214] = 5 batches, each batch 4 char, each char 214 hidden
         # hidden = we don't care
         out, hidden = self.lstm(embedding)
@@ -168,6 +295,7 @@ class LSTMModel(nn.Module):
             # batch_tag_index.reshape(-1) == [20]
             loss = self.cross_loss(prediction.reshape(-1, prediction.shape[-1]), batch_tag_index.reshape(-1))
             return loss
+
 
 # model = LSTM_CRF_Model(char_num, embedding_num, hidden_num, class_num, bi, tag_to_id)
 class LSTM_CRF_Model(nn.Module):
@@ -445,7 +573,6 @@ def final_test_BiLSTM_CRF(test_dataloader):
                     f.write(words[i] + '\t' + prediction[i] + '\t' + ground_truth[i] + '\n' )
 
 
-
 def final_test_BiLSTM(test_dataloader):
     global char_to_index, model, id_to_tag, device, tag_to_id
     # evaluation
@@ -500,6 +627,7 @@ def final_test_BiLSTM(test_dataloader):
         # predicted value
         print([f'{w}_{s}' for w, s in zip(text, prediction)])
 
+
 def save_model(model):
     torch.save(model, 'save_model/model.pk1')  # save entire net
     torch.save(model.state_dict(), 'save_model/model_parameters.pk1')  # save dict
@@ -530,12 +658,16 @@ if __name__ == "__main__":
     char_num = len(char_to_index)
     class_num = len(tag_to_id)
 
+    # load-in the radicals
+    id_to_one_radical = build_one_radical(data_dir='Radical/Unihan_IRGSources.txt')
+    id_to_ids = build_ids(data_dir='Radical/CHISEids.txt')
+
     # training setting
     epoch = 100
     train_batch_size = 10
     dev_batch_size = 100
     test_batch_size = 1
-    embedding_num = 400
+    embedding_num = 300
     hidden_num = 200  # one direction ; bi-drectional = 2 * hidden
     bi = True
     lr = 0.001
