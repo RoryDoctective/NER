@@ -14,10 +14,11 @@ from operator import itemgetter
 
 # global:
 REMOVE_O = False
-BI_LSTM_CRF = False
+BI_LSTM_CRF = True
 SHOW_REPORT = True
 
 One_Radical = True
+
 
 # https://github.com/luopeixiang/named_entity_recognition/blob/master/data.py
 def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
@@ -48,8 +49,8 @@ def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
 
     # reverse = False == shortest sentences first, longest sentences last
     # when do LSTM-CRF, set it to True
-    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=False)
-    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=False)
+    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=True)
+    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=True)
 
     if make_vocab:  # only for training set
         char2id = build_map(char_lists)
@@ -250,8 +251,9 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
         # add padding
         sentences = [i + [self.char2id['<PAD>']] * (batch_max_len - len(i)) for i in sentences]
         sentences_tag = [i + [self.tag2id['<PAD>']] * (batch_max_len - len(i)) for i in sentences_tag]
-        sentences_radical = [i + [self.id2onerad[self.char2id['<PAD>']]] * (batch_max_len - len(i))
-                             for i in sentences_radical]
+        if One_Radical:
+            sentences_radical = [i + [self.id2onerad[self.char2id['<PAD>']]] * (batch_max_len - len(i))
+                                for i in sentences_radical]
 
         # return tensor
         return torch.tensor(sentences, dtype=torch.int64, device=device), \
@@ -266,9 +268,12 @@ class LSTMModel(nn.Module):
     def __init__(self, char_num, embedding_num, hidden_num, class_num, bi=True):
         super().__init__()
         self.embedding = nn.Embedding(char_num, embedding_num)
-        self.one_radical_embedding = nn.Embedding(215, 10)
-        # 一层， batch在前面
-        self.lstm = nn.LSTM(embedding_num+10, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+        if One_Radical:
+            self.one_radical_embedding = nn.Embedding(215, 10)
+            # 一层， batch在前面
+            self.lstm = nn.LSTM(embedding_num+10, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+        else:
+            self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
 
         if bi:  # 双向：hidden# * 2
             self.classifier = nn.Linear(hidden_num * 2, class_num)
@@ -278,26 +283,13 @@ class LSTMModel(nn.Module):
         self.cross_loss = nn.CrossEntropyLoss()  # it contains softmax inside
 
     def forward(self, batch_char_index,batch_onerad_index, batch_tag_index=None ):
-        # if returns [5,4,101] means 5 batches, each batch 4 char, each char 101 dim represent.
-        embedding_char = self.embedding(batch_char_index)  # get character embedding
-        embedding_onerad = self.one_radical_embedding(batch_onerad_index)  # get radical embedding
-        embedding = torch.cat([embedding_char, embedding_onerad], 2)
-
         if One_Radical:
-            # prepare the radical TODO
-            # for i in range(batch_char_index.shape(2):
-            #     index = batch_char_index[:, :, i]
-            #     radical = id_to_one_radical[index]
-            # x = batch_char_index[:, :-1])
-            pass
-            # embedding + radical
-            # NOTE:
-            # embeds has a shape of (batch_size, each batch 4 char, embed_dim)
-            # inorder to merge this change this with x, reshape this to
-            # (batch_size, embed_dim)
-
-
-            # x = torch.cat((x, embeds.view(x.shape)), dim=1)
+            # if returns [5,4,101] means 5 batches, each batch 4 char, each char 101 dim represent.
+            embedding_char = self.embedding(batch_char_index)  # get character embedding
+            embedding_onerad = self.one_radical_embedding(batch_onerad_index)  # get radical embedding
+            embedding = torch.cat([embedding_char, embedding_onerad], 2)
+        else: # normal
+            embedding = self.embedding(batch_char_index)
 
         # out = 每一个字的结果 = [5,4,214] = 5 batches, each batch 4 char, each char 214 hidden
         # hidden = we don't care
@@ -324,11 +316,16 @@ class LSTM_CRF_Model(nn.Module):
     def __init__(self, char_num, embedding_num, hidden_num, class_num, bi=True):
         super().__init__()
         # self.tag_to_id = tag_to_id
-
         # 每一个汉字 + 一个embedding长度 = embedding
         self.embedding = nn.Embedding(char_num, embedding_num)
-        # 一层， batch在前面
-        self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+
+        if One_Radical:
+            self.one_radical_embedding = nn.Embedding(215, 10)
+            # 一层， batch在前面
+            self.lstm = nn.LSTM(embedding_num + 10, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+        else: # no radical
+            # 一层， batch在前面
+            self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
 
         if bi:  # 双向：hidden# * 2
             self.classifier = nn.Linear(hidden_num * 2, class_num)
@@ -420,8 +417,15 @@ class LSTM_CRF_Model(nn.Module):
         return targets
 
 
-    def forward(self, batch_data, batch_tag=None):
+    def forward(self, batch_data, batch_onerad, batch_tag=None):
         embedding = self.embedding(batch_data)
+        if One_Radical:
+            # if returns [5,4,101] means 5 batches, each batch 4 char, each char 101 dim represent.
+            embedding_char = self.embedding(batch_data)  # get character embedding
+            embedding_onerad = self.one_radical_embedding(batch_onerad)  # get radical embedding
+            embedding = torch.cat([embedding_char, embedding_onerad], 2)
+        else: # normal
+            embedding = self.embedding(batch_data)
         out,_ = self.lstm(embedding)
 
         emission = self.classifier(out)
@@ -435,7 +439,7 @@ class LSTM_CRF_Model(nn.Module):
         else:
             return crf_scores
 
-    def test(self, test_sents_tensor, lengths):
+    def test(self, test_sents_tensor, test_onerad_tensor ,lengths):
         """使用维特比算法进行解码"""
         global tag_to_id
         start_id = tag_to_id['<START>']
@@ -443,7 +447,7 @@ class LSTM_CRF_Model(nn.Module):
         pad = tag_to_id['<PAD>']
         tagset_size = len(tag_to_id)
 
-        crf_scores = self.forward(test_sents_tensor)
+        crf_scores = self.forward(test_sents_tensor, test_onerad_tensor)
         device = crf_scores.device
         # B:batch_size, L:max_len, T:target set size
         B, L, T, _ = crf_scores.size()
@@ -538,8 +542,8 @@ def final_test_BiLSTM_CRF(test_dataloader):
         all_char_test = []
 
         # we do it batch by batch
-        for test_batch_char_index, test_batch_tag_index, batch_len in test_dataloader:
-            pre_tag = model.test(test_batch_char_index, batch_len)
+        for test_batch_char_index, test_batch_tag_index, batch_len, test_batch_onerad_index in test_dataloader:
+            pre_tag = model.test(test_batch_char_index, test_batch_onerad_index, batch_len)
             all_pre_test.extend(pre_tag.detach().cpu().numpy().tolist())
             all_tag_test.extend(test_batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
             # get characters
@@ -757,7 +761,7 @@ if __name__ == "__main__":
             for dev_batch_char_index, dev_batch_tag_index, batch_len, dev_batch_onerad_index in dev_dataloader:
                 if BI_LSTM_CRF:
                     # using model.test
-                    pre_tag = model.test(dev_batch_char_index, batch_len)
+                    pre_tag = model.test(dev_batch_char_index, dev_batch_onerad_index,batch_len)
                     all_pre.extend(pre_tag.detach().cpu().numpy().tolist())
                     all_tag.extend(dev_batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
 
