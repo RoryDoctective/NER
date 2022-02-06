@@ -15,8 +15,9 @@ import numpy as np
 
 # global:
 REMOVE_O = False
-BI_LSTM_CRF = False
 SHOW_REPORT = True
+
+BI_LSTM_CRF = True
 
 One_Radical = False
 Three_Radicals = True
@@ -51,8 +52,8 @@ def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
 
     # reverse = False == shortest sentences first, longest sentences last
     # when do LSTM-CRF, set it to True
-    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=False)
-    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=False)
+    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=True)
+    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=True)
 
     if make_vocab:  # only for training set
         char2id = build_map(char_lists)
@@ -346,6 +347,7 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
                     torch.tensor(Temp[:,:,1], dtype=torch.int64, device=device),
                     torch.tensor(Temp[:,:,2], dtype=torch.int64, device=device)]
 
+
 # model = LSTMModel(char_num, embedding_num, hidden_num, class_num, bi)
 class LSTMModel(nn.Module):
     # 多少个不重复的汉字， 多少个embedding，LSTM隐藏大小， 分类类别， 双向
@@ -406,16 +408,19 @@ class LSTMModel(nn.Module):
 # model = LSTM_CRF_Model(char_num, embedding_num, hidden_num, class_num, bi, tag_to_id)
 class LSTM_CRF_Model(nn.Module):
     # 多少个不重复的汉字， 多少个embedding，LSTM隐藏大小， 分类类别， 双向
-    def __init__(self, char_num, embedding_num, hidden_num, class_num, bi=True):
+    def __init__(self, char_num, embedding_num, total_rad_ids, hidden_num, class_num, bi=True):
         super().__init__()
         # self.tag_to_id = tag_to_id
         # 每一个汉字 + 一个embedding长度 = embedding
         self.embedding = nn.Embedding(char_num, embedding_num)
 
         if One_Radical:
-            self.one_radical_embedding = nn.Embedding(215, 10)
+            self.one_radical_embedding = nn.Embedding(total_rad_ids, 50)
             # 一层， batch在前面
-            self.lstm = nn.LSTM(embedding_num + 10, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+            self.lstm = nn.LSTM(embedding_num + 50, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+        elif Three_Radicals:
+            self.one_radical_embedding = nn.Embedding(total_rad_ids, 100)
+            self.lstm = nn.LSTM(embedding_num + 100*3, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
         else:  # no radical
             # 一层， batch在前面
             self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
@@ -516,6 +521,12 @@ class LSTM_CRF_Model(nn.Module):
             embedding_char = self.embedding(batch_data)  # get character embedding
             embedding_onerad = self.one_radical_embedding(batch_onerad)  # get radical embedding
             embedding = torch.cat([embedding_char, embedding_onerad], 2)
+        elif Three_Radicals:
+            embedding_char = self.embedding(batch_data)  # get character embedding
+            embedding_onerad_0 = self.one_radical_embedding(batch_onerad[0])  # get radical embedding
+            embedding_onerad_1 = self.one_radical_embedding(batch_onerad[1])
+            embedding_onerad_2 = self.one_radical_embedding(batch_onerad[2])
+            embedding = torch.cat([embedding_char, embedding_onerad_0, embedding_onerad_1, embedding_onerad_2], 2)
         else:  # normal
             embedding = self.embedding(batch_data)
         out, _ = self.lstm(embedding)
