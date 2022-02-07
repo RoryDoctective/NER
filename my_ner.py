@@ -14,8 +14,10 @@ from operator import itemgetter
 import numpy as np
 
 # global:
-REMOVE_O = False
-SHOW_REPORT = True
+DEV = False
+
+REMOVE_O = True
+SHOW_REPORT = False
 
 BI_LSTM_CRF = True
 
@@ -32,14 +34,24 @@ def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
     char_lists = []
     tag_lists = []
 
-    with open(os.path.join(data_dir, 'weiboNER_2nd_conll.' + split), 'r', encoding='utf-8') as f:
+    with open(os.path.join(data_dir, 'demo.' + split), 'r', encoding='utf-8') as f:
         char_list = []
         tag_list = []
         for line in f:
             if line != '\n':
-                word, tag = line.strip('\n').split()
-                char_list.append(word[0])
-                tag_list.append(tag)
+                try:
+                    word, tag = line.strip('\n').split()
+                    char_list.append(word[0])
+                    tag_list.append(tag)
+                except:
+                    # to stop
+                    word, tag = line.strip('\n').split()
+                    #
+                    tag = line.strip('\n').split()
+                    char_list.append(' ')
+                    tag_list.append(tag[0])
+                    # print(tag)
+
             else:  # line = \n
                 if BI_LSTM_CRF:
                     char_lists.append(char_list + ["<END>"])
@@ -151,7 +163,7 @@ def build_ids(data_dir='Radical/CHISEids.txt'):
         Read in data
         id_to_many_radicals -> [id, ’⬚十日‘]
         'U+0080'*# = padding
-        'itself'*3 = not chinese
+        'itself'*3 = not chinese # TODO
     """
     global char_to_index, id_to_char
 
@@ -354,9 +366,9 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
             return torch.tensor(sentences, dtype=torch.int64, device=device), \
                    torch.tensor(sentences_tag, dtype=torch.int64, device=device), \
                    batch_lens, \
-                   [torch.tensor(Temp[:,:,0], dtype=torch.int64, device=device),
-                    torch.tensor(Temp[:,:,1], dtype=torch.int64, device=device),
-                    torch.tensor(Temp[:,:,2], dtype=torch.int64, device=device)]
+                   [torch.tensor(Temp[:, :, 0], dtype=torch.int64, device=device),
+                    torch.tensor(Temp[:, :, 1], dtype=torch.int64, device=device),
+                    torch.tensor(Temp[:, :, 2], dtype=torch.int64, device=device)]
         else:  # no radicals
             sentences_radical = [i + [self.id2rad[self.char2id['<PAD>']]] * (batch_max_len - len(i))
                                  for i in sentences_radical]
@@ -364,6 +376,7 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
                    torch.tensor(sentences_tag, dtype=torch.int64, device=device), \
                    batch_lens, \
                    torch.tensor(sentences_radical, dtype=torch.int64, device=device)
+
 
 # model = LSTMModel(char_num, embedding_num, hidden_num, class_num, bi)
 class LSTMModel(nn.Module):
@@ -377,7 +390,7 @@ class LSTMModel(nn.Module):
             self.lstm = nn.LSTM(embedding_num + 50, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
         elif Three_Radicals:
             self.one_radical_embedding = nn.Embedding(total_rad_ids, 100)
-            self.lstm = nn.LSTM(embedding_num + 100*3, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+            self.lstm = nn.LSTM(embedding_num + 100 * 3, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
         else:
             self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
 
@@ -437,7 +450,7 @@ class LSTM_CRF_Model(nn.Module):
             self.lstm = nn.LSTM(embedding_num + 50, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
         elif Three_Radicals:
             self.one_radical_embedding = nn.Embedding(total_rad_ids, 100)
-            self.lstm = nn.LSTM(embedding_num + 100*3, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+            self.lstm = nn.LSTM(embedding_num + 100 * 3, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
         else:  # no radical
             # 一层， batch在前面
             self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
@@ -713,7 +726,7 @@ def final_test_BiLSTM_CRF(test_dataloader):
             # show output truth
             ground_truth = [id_to_tag[i] for i in all_tag_test]
 
-            with open('Report/test_result.txt', 'w', encoding='utf-8') as f:
+            with open('Report/RawReport.txt', 'w', encoding='utf-8') as f:
                 for i in range(len(words)):
                     f.write(words[i] + '\t' + prediction[i] + '\t' + ground_truth[i] + '\n')
 
@@ -782,7 +795,7 @@ def final_test_BiLSTM(test_dataloader):
             # show output truth
             ground_truth = [id_to_tag[i] for i in all_tag_test]
 
-            with open('Report/test_result.txt', 'w', encoding='utf-8') as f:
+            with open('Report/RawReport.txt', 'w', encoding='utf-8') as f:
                 for i in range(len(words)):
                     f.write(words[i] + '\t' + prediction[i] + '\t' + ground_truth[i] + '\n')
 
@@ -805,9 +818,10 @@ if __name__ == "__main__":
 
     # data-load in
     train_data, train_tag, char_to_index, tag_to_id = build_corpus('train', make_vocab=True,
-                                                                   data_dir='Dataset/weiboNER')
-    dev_data, dev_tag = build_corpus('dev', make_vocab=False, data_dir='Dataset/weiboNER')
-    test_data, test_tag = build_corpus('test', make_vocab=False, data_dir='Dataset/weiboNER')
+                                                                   data_dir='Dataset/MSRA')
+    if DEV:
+        dev_data, dev_tag = build_corpus('dev', make_vocab=False, data_dir='Dataset/MSRA')
+    test_data, test_tag = build_corpus('test', make_vocab=False, data_dir='Dataset/MSRA')
 
     # index -> tag
     id_to_tag = [i for i in tag_to_id]
@@ -827,7 +841,7 @@ if __name__ == "__main__":
     else:  # create dummy
         id_to_radical, total_rad_ids = dummy_radical()
     # training setting
-    epoch = 10
+    epoch = 20
     train_batch_size = 10
     dev_batch_size = 100
     test_batch_size = 1
@@ -844,9 +858,10 @@ if __name__ == "__main__":
                                   collate_fn=train_dataset.pro_batch_data)
 
     # evaluation
-    dev_dataset = MyDataset(dev_data, dev_tag, char_to_index, tag_to_id, id_to_radical)
-    dev_dataloader = DataLoader(dev_dataset, dev_batch_size, shuffle=False,
-                                collate_fn=dev_dataset.pro_batch_data)
+    if DEV:
+        dev_dataset = MyDataset(dev_data, dev_tag, char_to_index, tag_to_id, id_to_radical)
+        dev_dataloader = DataLoader(dev_dataset, dev_batch_size, shuffle=False,
+                                    collate_fn=dev_dataset.pro_batch_data)
 
     # test data
     test_dataset = MyDataset(test_data, test_tag, char_to_index, tag_to_id, id_to_radical)
@@ -855,10 +870,10 @@ if __name__ == "__main__":
 
     # SETTING
     if BI_LSTM_CRF:
-        model = LSTM_CRF_Model(char_num, embedding_num,total_rad_ids, hidden_num, class_num, bi)
+        model = LSTM_CRF_Model(char_num, embedding_num, total_rad_ids, hidden_num, class_num, bi)
         opt = torch.optim.AdamW(model.parameters(), lr=lr)  # Adam/AdamW
     else:
-        model = LSTMModel(char_num, embedding_num,total_rad_ids, hidden_num, class_num, bi)
+        model = LSTMModel(char_num, embedding_num, total_rad_ids, hidden_num, class_num, bi)
         opt = torch.optim.Adam(model.parameters(), lr=lr)  # Adam/AdamW
     model = model.to(device)
 
@@ -874,37 +889,38 @@ if __name__ == "__main__":
             opt.zero_grad()
         print(f'train_loss:{train_loss:.3f}')
 
-        # evaluation
-        model.eval()  # F1, acc, recall, F1 score
-        # 验证时不做更新
-        with torch.no_grad():  # detach
-            # need to recall all of them
-            all_pre = []
-            all_tag = []
+        if DEV:
+            # evaluation
+            model.eval()  # F1, acc, recall, F1 score
+            # 验证时不做更新
+            with torch.no_grad():  # detach
+                # need to recall all of them
+                all_pre = []
+                all_tag = []
 
-            # we do it batch by batch
-            for dev_batch_char_index, dev_batch_tag_index, batch_len, dev_batch_onerad_index in dev_dataloader:
-                if BI_LSTM_CRF:
-                    # using model.test
-                    pre_tag = model.test(dev_batch_char_index, dev_batch_onerad_index, batch_len)
-                    all_pre.extend(pre_tag.detach().cpu().numpy().tolist())
-                    all_tag.extend(dev_batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
+                # we do it batch by batch
+                for dev_batch_char_index, dev_batch_tag_index, batch_len, dev_batch_onerad_index in dev_dataloader:
+                    if BI_LSTM_CRF:
+                        # using model.test
+                        pre_tag = model.test(dev_batch_char_index, dev_batch_onerad_index, batch_len)
+                        all_pre.extend(pre_tag.detach().cpu().numpy().tolist())
+                        all_tag.extend(dev_batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
 
-                    # self-added
-                    dev_loss = 0
+                        # self-added
+                        dev_loss = 0
 
-                else:  # LSTM
-                    # loss
-                    dev_loss = model.forward(dev_batch_char_index, dev_batch_onerad_index, dev_batch_tag_index)
-                    # score
-                    all_pre.extend(model.prediction.detach().cpu().numpy().tolist())
-                    # reshape(-1): 一句话里面很多字，全部拉平
-                    all_tag.extend(dev_batch_tag_index.detach().cpu().numpy().reshape(-1).tolist())
+                    else:  # LSTM
+                        # loss
+                        dev_loss = model.forward(dev_batch_char_index, dev_batch_onerad_index, dev_batch_tag_index)
+                        # score
+                        all_pre.extend(model.prediction.detach().cpu().numpy().tolist())
+                        # reshape(-1): 一句话里面很多字，全部拉平
+                        all_tag.extend(dev_batch_tag_index.detach().cpu().numpy().reshape(-1).tolist())
 
-            # calculate score
-            score = f1_score(all_tag, all_pre, average='micro')  # micro/多类别的
-            # print('score')
-            print(f'epoch:{e}, f1_score:{score:.3f}, dev_loss:{dev_loss:.3f}')
+                # calculate score
+                score = f1_score(all_tag, all_pre, average='micro')  # micro/多类别的
+                # print('score')
+                print(f'epoch:{e}, f1_score:{score:.3f}, dev_loss:{dev_loss:.3f}')
 
     # Test the model:
     if BI_LSTM_CRF:
@@ -913,10 +929,10 @@ if __name__ == "__main__":
         final_test_BiLSTM(test_dataloader)
 
     # save model
-    save_model(model)
+    # save_model(model)
 
     # load model
-    load_model()
+    # load_model()
 
     # manual input
     test()
