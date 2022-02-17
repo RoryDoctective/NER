@@ -12,21 +12,26 @@ import torch.nn as nn
 from sklearn.metrics import f1_score
 from operator import itemgetter
 import numpy as np
+import matplotlib.pyplot as plt
+import textwrap
 
 # global:
-DEV = False
+# Weibo, Resume, MSRA(no_dev), Literature(error), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce
+DATASET = 'E-commerce'
+DEV = True
 
 REMOVE_O = True
 SHOW_REPORT = False
+DRAW_GRAPH = True
 
-BI_LSTM_CRF = True
+BI_LSTM_CRF = False
 
 One_Radical = False
 Three_Radicals = False
 
 
 # https://github.com/luopeixiang/named_entity_recognition/blob/master/data.py
-def build_corpus(split, make_vocab=True, data_dir='Dataset/weiboNER'):
+def build_corpus(split, make_vocab=True, data_dir='Dataset/Weibo'):
     """Read in data"""
 
     assert split in ['train', 'dev', 'test']
@@ -812,16 +817,54 @@ def load_model():
     return model
 
 
+def draw_plot(train_f1, train_loss_, dev_f1, dev_loss_, model_='LSTM', dataset_='Weibo', out_dir='output.png'):
+    assert len(train_f1) == len(dev_f1)
+    assert len(train_f1) == len(train_loss_)
+    assert len(dev_f1) == len(dev_loss_)
+
+    # epoch
+    xdata = np.arange(0, len(train_f1))
+    # data
+    ydata_train_f1 = train_f1
+    ydata_train_loss = train_loss_
+    ydata_dev_f1 = dev_f1
+    ydata_dev_loss = dev_loss_
+
+    # set subplot
+    plt.clf()
+    f = plt.figure(figsize=(10,4))
+    ax1 = f.add_subplot(121)
+    ax2 = f.add_subplot(122)
+
+    title = f'{model_} model on {dataset_} dataset'
+    f.suptitle('\n'.join(textwrap.wrap(title, 75)))
+
+    ax1.plot(xdata, ydata_train_f1, marker='1', linestyle='-', color='r', label='train', linewidth=1)
+    ax1.plot(xdata, ydata_dev_f1, marker='1', linestyle='-', color='b', label='dev', linewidth=1)
+    ax1.set(xlabel='epoch',ylabel='f1 scores')
+    ax1.set_title('model f1 score')
+    ax1.legend(loc='best')
+
+    ax2.plot(xdata, ydata_train_loss, marker='1', linestyle='-', color='r', label='train', linewidth=1)
+    ax2.plot(xdata, ydata_dev_loss, marker='1', linestyle='-', color='b', label='dev', linewidth=1)
+    ax2.set(xlabel='epoch',ylabel='loss')
+    ax2.set_title('model loss')
+    ax2.legend(loc='best')
+
+    plt.savefig(out_dir)
+    plt.show()
+
+
 if __name__ == "__main__":
     # pre-setting
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
     # data-load in
     train_data, train_tag, char_to_index, tag_to_id = build_corpus('train', make_vocab=True,
-                                                                   data_dir='Dataset/MSRA')
+                                                                   data_dir=f'Dataset/{DATASET}')
     if DEV:
-        dev_data, dev_tag = build_corpus('dev', make_vocab=False, data_dir='Dataset/MSRA')
-    test_data, test_tag = build_corpus('test', make_vocab=False, data_dir='Dataset/MSRA')
+        dev_data, dev_tag = build_corpus('dev', make_vocab=False, data_dir=f'Dataset/{DATASET}')
+    test_data, test_tag = build_corpus('test', make_vocab=False, data_dir=f'Dataset/{DATASET}')
 
     # index -> tag
     id_to_tag = [i for i in tag_to_id]
@@ -840,6 +883,7 @@ if __name__ == "__main__":
         id_to_radical, total_rad_ids = build_ids(data_dir='Radical/CHISEids.txt')
     else:  # create dummy
         id_to_radical, total_rad_ids = dummy_radical()
+
     # training setting
     epoch = 20
     train_batch_size = 10
@@ -877,17 +921,42 @@ if __name__ == "__main__":
         opt = torch.optim.Adam(model.parameters(), lr=lr)  # Adam/AdamW
     model = model.to(device)
 
+    # draw the curve
+    train_model_f1 = []
+    train_model_lost = []
+    dev_model_f1 = []
+    dev_model_lost = []
+
     # start training
     for e in range(epoch):
         # train
         model.train()
+
+        # need to recall all for draw
+        all_pre = []
+        all_tag = []
+
         for batch_char_index, batch_tag_index, batch_len, batch_onerad_index in train_dataloader:
             # both of them already in cuda
             train_loss = model.forward(batch_char_index, batch_onerad_index, batch_tag_index)
             train_loss.backward()
             opt.step()
             opt.zero_grad()
-        print(f'train_loss:{train_loss:.3f}')
+            # for drawing
+            if BI_LSTM_CRF:
+                pass
+            else:  # LSTM
+                # score
+                all_pre.extend(model.prediction.detach().cpu().numpy().tolist())
+                # reshape(-1): 一句话里面很多字，全部拉平
+                all_tag.extend(batch_tag_index.detach().cpu().numpy().reshape(-1).tolist())
+
+        # calculate score
+        train_score = f1_score(all_tag, all_pre, average='micro')  # micro/多类别的
+        train_model_f1.append(train_score)
+        train_model_lost.append(train_loss.detach().cpu())
+        # print(f'train_loss:{train_loss:.3f}')
+        print(f'epoch:{e}, train_f1_score:{train_score:.5f}, train_loss:{train_loss:.5f}')
 
         if DEV:
             # evaluation
@@ -918,9 +987,11 @@ if __name__ == "__main__":
                         all_tag.extend(dev_batch_tag_index.detach().cpu().numpy().reshape(-1).tolist())
 
                 # calculate score
-                score = f1_score(all_tag, all_pre, average='micro')  # micro/多类别的
+                dev_score = f1_score(all_tag, all_pre, average='micro')  # micro/多类别的
                 # print('score')
-                print(f'epoch:{e}, f1_score:{score:.3f}, dev_loss:{dev_loss:.3f}')
+                dev_model_f1.append(dev_score)
+                dev_model_lost.append(dev_loss.detach().cpu())
+                print(f'epoch:{e}, dev_f1_score:{dev_score:.5f}, dev_loss:{dev_loss:.5f}')
 
     # Test the model:
     if BI_LSTM_CRF:
@@ -933,6 +1004,22 @@ if __name__ == "__main__":
 
     # load model
     # load_model()
+
+    # draw the plot
+    if DRAW_GRAPH:
+        # setting names
+        if BI_LSTM_CRF:
+            model_name = 'BI_LSTM_CRF'
+        else:
+            model_name = 'BI_LSTM'
+
+        if One_Radical:
+            radical_state = 'One_radical'
+        elif Three_Radicals:
+            radical_state = 'Three_radicals'
+        else:
+            radical_state = 'No_radicals'
+        draw_plot(train_model_f1, train_model_lost, dev_model_f1, dev_model_lost, model_='LSTM', dataset_=DATASET, out_dir=f'Figure/{model_name}-{DATASET}-{radical_state}.png')
 
     # manual input
     test()

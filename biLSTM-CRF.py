@@ -6,7 +6,7 @@ import torch.nn as nn
 from sklearn.metrics import f1_score
 
 
-def build_corpus(split, make_vocab=True, data_dir="Dataset/weiboNER"):
+def build_corpus(split, make_vocab=True, data_dir="Dataset/Weibo"):
     """读取数据"""
     assert split in ['train', 'dev', 'test']
 
@@ -285,8 +285,8 @@ if __name__ == "__main__":
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     train_data, train_tag, word_2_index, tag_2_index = build_corpus("train", make_vocab=True,
-                                                                 data_dir='Dataset/weiboNER')
-    dev_data, dev_tag = build_corpus("dev", make_vocab=False, data_dir='Dataset/weiboNER')
+                                                                    data_dir='Dataset/Weibo')
+    dev_data, dev_tag = build_corpus("dev", make_vocab=False, data_dir='Dataset/Weibo')
 
     index_2_tag = [i for i in tag_2_index]
 
