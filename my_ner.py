@@ -16,15 +16,15 @@ import matplotlib.pyplot as plt
 import textwrap
 
 # global:
-# Weibo, Resume, MSRA(no_dev), Literature(error), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce
-DATASET = 'E-commerce'
+# Weibo, Resume, MSRA(no_dev), Literature(error), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
+DATASET = 'Novel'
 DEV = True
 
 REMOVE_O = True
 SHOW_REPORT = False
 DRAW_GRAPH = True
 
-BI_LSTM_CRF = False
+BI_LSTM_CRF = True
 
 One_Radical = False
 Three_Radicals = False
@@ -550,7 +550,6 @@ class LSTM_CRF_Model(nn.Module):
         return targets
 
     def forward(self, batch_data, batch_onerad, batch_tag=None):
-        embedding = self.embedding(batch_data)
         if One_Radical:
             # if returns [5,4,101] means 5 batches, each batch 4 char, each char 101 dim represent.
             embedding_char = self.embedding(batch_data)  # get character embedding
@@ -944,7 +943,11 @@ if __name__ == "__main__":
             opt.zero_grad()
             # for drawing
             if BI_LSTM_CRF:
-                pass
+                # using model.test
+                pre_tag = model.test(batch_char_index, batch_onerad_index, batch_len)
+                all_pre.extend(pre_tag.detach().cpu().numpy().tolist())
+                all_tag.extend(batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
+
             else:  # LSTM
                 # score
                 all_pre.extend(model.prediction.detach().cpu().numpy().tolist())
@@ -970,13 +973,12 @@ if __name__ == "__main__":
                 # we do it batch by batch
                 for dev_batch_char_index, dev_batch_tag_index, batch_len, dev_batch_onerad_index in dev_dataloader:
                     if BI_LSTM_CRF:
+                        # self-loss-added
+                        dev_loss = model.forward(dev_batch_char_index, dev_batch_onerad_index, dev_batch_tag_index)
                         # using model.test
                         pre_tag = model.test(dev_batch_char_index, dev_batch_onerad_index, batch_len)
                         all_pre.extend(pre_tag.detach().cpu().numpy().tolist())
                         all_tag.extend(dev_batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
-
-                        # self-added
-                        dev_loss = 0
 
                     else:  # LSTM
                         # loss
@@ -993,11 +995,11 @@ if __name__ == "__main__":
                 dev_model_lost.append(dev_loss.detach().cpu())
                 print(f'epoch:{e}, dev_f1_score:{dev_score:.5f}, dev_loss:{dev_loss:.5f}')
 
-    # Test the model:
-    if BI_LSTM_CRF:
-        final_test_BiLSTM_CRF(test_dataloader)
-    else:
-        final_test_BiLSTM(test_dataloader)
+    # # Test the model:
+    # if BI_LSTM_CRF:
+    #     final_test_BiLSTM_CRF(test_dataloader)
+    # else:
+    #     final_test_BiLSTM(test_dataloader)
 
     # save model
     # save_model(model)
