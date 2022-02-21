@@ -17,7 +17,7 @@ import textwrap
 
 # global:
 # Weibo, Resume, MSRA(no_dev), Literature(error), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
-DATASET = 'Novel'
+DATASET = 'Weibo'
 DEV = True
 
 REMOVE_O = True
@@ -446,6 +446,11 @@ class LSTM_CRF_Model(nn.Module):
     def __init__(self, char_num, embedding_num, total_rad_ids, hidden_num, class_num, bi=True):
         super().__init__()
         # self.tag_to_id = tag_to_id
+
+        # add dropout
+        # prob = 0.5 !! can be tunned
+        self.drop = nn.Dropout(0.5)
+
         # 每一个汉字 + 一个embedding长度 = embedding
         self.embedding = nn.Embedding(char_num, embedding_num)
 
@@ -461,6 +466,7 @@ class LSTM_CRF_Model(nn.Module):
             self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
 
         # Maps the output of the LSTM into tag space.
+        # = hidden2tag
         if bi:  # 双向：hidden# * 2
             self.classifier = nn.Linear(hidden_num * 2, class_num)
         else:
@@ -476,9 +482,16 @@ class LSTM_CRF_Model(nn.Module):
         # Matrix of transition parameters.  Entry i,j is the score of
         # transitioning *to* i *from* j. (j -> i)
         self.transition = nn.Parameter(torch.ones(class_num, class_num) * 1 / class_num)
+        global tag_to_id
+        # These two statements enforce the constraint that we never transfer
+        # to the start tag and we never transfer from the stop tag
+        self.transition.data[tag_to_id['<START>'], :] = -10000
+        self.transition.data[:, tag_to_id['<END>']] = -10000
 
         # This need to be self_defined.
         self.loss_fun = self.cal_lstm_crf_loss
+
+
 
     # 完全看不懂
     def cal_lstm_crf_loss(self, crf_scores, targets):
@@ -553,6 +566,7 @@ class LSTM_CRF_Model(nn.Module):
         return targets
 
     def forward(self, batch_data, batch_onerad, batch_tag=None):
+        # embedding
         if One_Radical:
             # if returns [5,4,101] means 5 batches, each batch 4 char, each char 101 dim represent.
             embedding_char = self.embedding(batch_data)  # get character embedding
@@ -566,17 +580,26 @@ class LSTM_CRF_Model(nn.Module):
             embedding = torch.cat([embedding_char, embedding_onerad_0, embedding_onerad_1, embedding_onerad_2], 2)
         else:  # normal
             embedding = self.embedding(batch_data)
+
+        # add dropout layer
+        embedding = self.drop(embedding)
+
+        # do bi-lstm
         out, _ = self.lstm(embedding)
 
+        # value of each tag
         emission = self.classifier(out)
+        # [10, 176, 20] = batch, max_length_of_input_sentences, tags的种类
         batch_size, max_len, out_size = emission.size()
 
+        # emission+transition
+        # [10, 176, 20] -> ([10, 176, 1, 20]) -> ([10, 176, 20, 20]) +([20,20]) = ([10, 176, 20, 20])
         crf_scores = emission.unsqueeze(2).expand(-1, -1, out_size, -1) + self.transition
 
-        if batch_tag is not None:
+        if batch_tag is not None:  # training
             loss = self.cal_lstm_crf_loss(crf_scores, batch_tag)
             return loss
-        else:
+        else:  # when do prediction
             return crf_scores
 
     def test(self, test_sents_tensor, test_onerad_tensor, lengths):
