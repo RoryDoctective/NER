@@ -492,10 +492,11 @@ class LSTM_CRF_Model(nn.Module):
         self.loss_fun = self.cal_lstm_crf_loss
 
 
-
-    # 完全看不懂
     def cal_lstm_crf_loss(self, crf_scores, targets):
-        # 该损失函数的计算可以参考: https: // arxiv.org / pdf / 1603.01360.pdf
+        # size  = [10, 176, 20, 20]; [10, 176]
+        # targets = tags
+
+        # init
         global tag_to_id
         pad_id = tag_to_id.get('<PAD>')
         start_id = tag_to_id.get('<START>')
@@ -508,8 +509,12 @@ class LSTM_CRF_Model(nn.Module):
         target_size = len(tag_to_id)
 
         # mask = 1 - ((targets == pad_id) + (targets == end_id))  # [B, L]
+        # mask = a tensor of True/False; not_pad/pad;
         mask = (targets != pad_id)
+        # number of True/not_pad
         lengths = mask.sum(dim=1)
+        # input: ( tags of [10, 176]; 20; 19 )
+        # output: (0~380) [10, 176]
         targets = self.indexed(targets, target_size, start_id)
 
         # # 计算Golden scores方法１
@@ -556,13 +561,19 @@ class LSTM_CRF_Model(nn.Module):
         loss = (all_path_scores - golden_scores) / batch_size
         return loss
 
-    # 完全看不懂
+    # (0~19) -> (0~380)
     def indexed(self, targets, tagset_size, start_id):
-        """将targets中的数转化为在[T*T]大小序列中的索引,T是标注的种类"""
+        # input: ( tags of [10, 176]; 20; 19 )
+        """将targets中的数转化为-> 在[T*T]大小序列中的索引,T是标注的种类"""
         batch_size, max_len = targets.size()
-        for col in range(max_len - 1, 0, -1):
+        for col in range(max_len - 1, 0, -1):  # reverse (175 -> 0)
+            # col = 175;
+            # targets[:, col - 1] = [ 0, 18, 18, 18, 18, 18, 18, 18, 18, 18]
+            # targets[:, col] += up*20
             targets[:, col] += (targets[:, col - 1] * tagset_size)
+        # 19*20
         targets[:, 0] += (start_id * tagset_size)
+        # still [10, 176]
         return targets
 
     def forward(self, batch_data, batch_onerad, batch_tag=None):
@@ -597,11 +608,13 @@ class LSTM_CRF_Model(nn.Module):
         crf_scores = emission.unsqueeze(2).expand(-1, -1, out_size, -1) + self.transition
 
         if batch_tag is not None:  # training
+            # [10, 176, 20, 20]; [10, 176]
             loss = self.cal_lstm_crf_loss(crf_scores, batch_tag)
             return loss
         else:  # when do prediction
             return crf_scores
 
+    # Find the best path, given the features(emission scores).
     def test(self, test_sents_tensor, test_onerad_tensor, lengths):
         """使用维特比算法进行解码"""
         global tag_to_id
@@ -912,7 +925,7 @@ if __name__ == "__main__":
     # training setting
     epoch = 20
     train_batch_size = 10
-    dev_batch_size = 100
+    dev_batch_size = 10
     test_batch_size = 1
     # reduce 0-300
     embedding_num = 200
