@@ -460,6 +460,7 @@ class LSTM_CRF_Model(nn.Module):
             # 一层， batch在前面
             self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
 
+        # Maps the output of the LSTM into tag space.
         if bi:  # 双向：hidden# * 2
             self.classifier = nn.Linear(hidden_num * 2, class_num)
         else:
@@ -472,6 +473,8 @@ class LSTM_CRF_Model(nn.Module):
         #         [0.2500, 0.2500, 0.2500, 0.2500],
         #         [0.2500, 0.2500, 0.2500, 0.2500],
         #         [0.2500, 0.2500, 0.2500, 0.2500]])
+        # Matrix of transition parameters.  Entry i,j is the score of
+        # transitioning *to* i *from* j. (j -> i)
         self.transition = nn.Parameter(torch.ones(class_num, class_num) * 1 / class_num)
 
         # This need to be self_defined.
@@ -888,10 +891,14 @@ if __name__ == "__main__":
     train_batch_size = 10
     dev_batch_size = 100
     test_batch_size = 1
+    # reduce 0-300
     embedding_num = 200
+    ## reduce 100-300
     hidden_num = 200  # one direction ; bi-drectional = 2 * hidden
     bi = True
+    # both direction
     lr = 0.001
+
 
     # get dataset
     # no shuffle ordered by the len of sentence
