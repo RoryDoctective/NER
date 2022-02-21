@@ -284,6 +284,34 @@ def is_idc(text):
         return False
 
 
+def argmax(vec):
+    # vec of size [10, 1, 20]
+    # torch.max(torch.tensor([[1, 2, 3, 4, 5], [6, 5, 4, 3, 2]]), 1)
+    # Out[14]:
+    # torch.return_types.max(
+    #     values=tensor([5, 6]),
+    #     indices=tensor([4, 0]))
+
+    # return the argmax as a python int
+    _, idx = torch.max(vec, 2)
+
+    # size = [10,1]
+    return idx
+
+
+# Compute log sum exp in a numerically stable way for the forward algorithm
+def log_sum_exp(vec):
+    # vec of size [10, 1, 20]
+    # max_score of size [10,1]
+    max_score, _ = torch.max(vec, 2)
+    # max_score_broadcast of size [10, 1, 20]
+    max_score_broadcast = max_score.view(vec.size()[0], 1, -1).expand(vec.size()[0], 1, vec.size()[2])
+    # vec - max_score
+    # size = [10, 1]
+    return max_score + \
+        torch.log(torch.sum(torch.exp(vec - max_score_broadcast), 2))
+
+
 class MyDataset(Dataset):  # Inherit the torch Dataset
     # 汉字，标签
     def __init__(self, data, tag, char2id, tag2id, id2rad):
@@ -446,6 +474,7 @@ class LSTM_CRF_Model(nn.Module):
     def __init__(self, char_num, embedding_num, total_rad_ids, hidden_num, class_num, bi=True):
         super().__init__()
         # self.tag_to_id = tag_to_id
+        # self.tagset_size = class_num
 
         # add dropout
         # prob = 0.5 !! can be tunned
@@ -576,7 +605,8 @@ class LSTM_CRF_Model(nn.Module):
         # still [10, 176]
         return targets
 
-    def forward(self, batch_data, batch_onerad, batch_tag=None):
+    # emission score
+    def _get_lstm_features(self, batch_data, batch_onerad):
         # embedding
         if One_Radical:
             # if returns [5,4,101] means 5 batches, each batch 4 char, each char 101 dim represent.
@@ -591,42 +621,153 @@ class LSTM_CRF_Model(nn.Module):
             embedding = torch.cat([embedding_char, embedding_onerad_0, embedding_onerad_1, embedding_onerad_2], 2)
         else:  # normal
             embedding = self.embedding(batch_data)
-
         # add dropout layer
         embedding = self.drop(embedding)
-
         # do bi-lstm
         out, _ = self.lstm(embedding)
-
         # value of each tag
         emission = self.classifier(out)
         # [10, 176, 20] = batch, max_length_of_input_sentences, tags的种类
+        return emission
+
+    # total path score
+    def _forward_alg(self, feats):
+        device = feats.device
+
+        # [10, 176, 20] = batch, max_length_of_input_sentences, tags的种类
+        batch_size, max_len, out_size = feats.size()
+        # Do the forward algorithm to compute the partition function (all path score)
+        # size = [batch_size, len(tags)], value = -10000
+        init_alphas = torch.full((batch_size, 1, out_size), -10000.)
+        # START_TAG has all of the score.
+        init_alphas[:, :, tag_to_id['<START>']] = 0.
+
+        # Wrap in a variable so that we will get automatic backprop
+        # [10, 1, 20]
+        forward_var = init_alphas.to(device)
+
+        # swap dimension of the feats
+        # [10, 176, 20] -> [176, 10, 20]
+        feats = torch.transpose(feats, 0, 1)
+        # Iterate through the sentence
+        for feat in feats:  # feat size = [10,20]
+            alphas_t = []  # The forward tensors at this timestep
+            for next_tag in range(out_size):
+                # broadcast the emission score: it is the same regardless of the previous tag
+                # size of [10] -> [10,1,1] -> [10, 1, 20]
+                emit_score = feat[:, next_tag].view(batch_size, 1, -1).expand(batch_size, 1, out_size)
+                # the ith entry of trans_score = the score of transitioning to next_tag from i
+                # i(all i s) -> next_tag
+                # size [20] ->  [10, 1, 20]
+                trans_score = self.transition[next_tag].expand(batch_size, 1, out_size)
+                # The ith entry of next_tag_var = the value for the edge (i -> next_tag) before we do log-sum-exp
+                # size = [10, 1, 20]
+                next_tag_var = forward_var + trans_score + emit_score
+                # The forward variable for this tag = log-sum-exp of all the scores.
+                # size = [10,1] # TODO
+                alphas_t.append(log_sum_exp(next_tag_var).view(batch_size, -1))
+            # size [10,1,20]
+            forward_var = torch.cat(alphas_t, 1).view(batch_size, 1, out_size)
+        # i (all s) -> STOP
+        terminal_var = forward_var + self.transition[tag_to_id['<END>']].expand(batch_size, 1, out_size)
+        # final
+        alpha = log_sum_exp(terminal_var)
+        # size = [10, 1]
+        return alpha
+
+    # real path score
+    def _score_sentence(self, feats, tags):
+        # Gives the score of a provided tag sequence
+        # feats = size [10, 176, 20]
+        # [10, 176, 20] = batch, max_length_of_input_sentences, tags的种类
+        batch_size, max_len, out_size = feats.size()
+        device = feats.device
+        # tags = size [10, 176]
+        # score = size [10]
+        score = torch.zeros(10).to(device)
+        # [tag_to_id['<START>']] = [19]
+        # torch.tensor([self.tag_to_ix[START_TAG]], dtype=torch.long) = tensor([19])
+        # [torch.tensor([self.tag_to_ix[START_TAG]], dtype=torch.long), tags] =
+        #       [tensor([3]), tensor([0, 1, 1, 1, 2, 2, 2, 0, 1, 2, 2])]
+        # tags =
+        #       tensor([3, 0, 1, 1, 1, 2, 2, 2, 0, 1, 2, 2])
+
+        # add start
+        #   torch.Size([10, 177])
+        tags = torch.cat([torch.tensor([tag_to_id['<START>']], dtype=torch.long).expand(batch_size, 1).to(device), tags], 1)
+
+        # swap dimension of the feats
+        # [10, 176, 20] -> [176, 10, 20]
+        feats = torch.transpose(feats, 0, 1)
+
+        # do middle
+        # # feats = size [176, 10, 20]
+        # feat = [10,20] ; i = 0-175
+        for i, feat in enumerate(feats):
+            # emission
+            emission = []
+            for j in range(batch_size):
+                emission.append(feat[j][tags[:, i + 1][j]].view(1,-1))
+            # size = [10,1]
+            emission = torch.cat(emission, 0).reshape(-1)
+
+            # Trans: tags[i] -> tags[i + 1] ; size[10]
+            # + Emission size[10] TODO feat[:, tags[:, i + 1]]
+            score = score + \
+                self.transition[tags[:, i + 1], tags[:, i]] + emission
+
+        # add end : tran: 2->4, last tag to end tag
+        score = score + self.transition[torch.tensor(tag_to_id['<END>'], dtype=torch.long).expand(batch_size), tags[:, -1]]
+        # size[10, 1]
+        return score.view(-1, 1)
+
+    # return loss / DONE
+    def forward(self, batch_data, batch_onerad, batch_tag):
+        # value of each tag
+        # [10, 176, 20] = batch, max_length_of_input_sentences, tags的种类
+        emission = self._get_lstm_features(batch_data, batch_onerad)
         batch_size, max_len, out_size = emission.size()
 
-        # emission+transition
-        # [10, 176, 20] -> ([10, 176, 1, 20]) -> ([10, 176, 20, 20]) +([20,20]) = ([10, 176, 20, 20])
-        crf_scores = emission.unsqueeze(2).expand(-1, -1, out_size, -1) + self.transition
+        # alpha = total path score
+        # alpha size = [10, 1]
+        forward_score = self._forward_alg(emission)
 
-        if batch_tag is not None:  # training
-            # [10, 176, 20, 20]; [10, 176]
-            loss = self.cal_lstm_crf_loss(crf_scores, batch_tag)
-            return loss
-        else:  # when do prediction
-            return crf_scores
+        # gold = real path score
+        # gold size = [10,1]
+        gold_score = self._score_sentence(emission, batch_tag)
+
+        # loss = #
+        loss = (forward_score.sum() - gold_score.sum()) / batch_size
+        return loss
+
+    def prediction(self, test_sents_tensor, test_onerad_tensor):
+        # Get the emission scores from the BiLSTM
+        lstm_feats = self._get_lstm_features(test_sents_tensor, test_onerad_tensor)
+        # Find the best path, given the features.
+        score, tag_seq = self._viterbi_decode(lstm_feats)
+        # e.g. tensor(2.6907), [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1]
+        return score, tag_seq
+
 
     # Find the best path, given the features(emission scores).
-    def test(self, test_sents_tensor, test_onerad_tensor, lengths):
+    def _viterbi_decode(self, feats): # TODO
+        # Gives the score of a provided tag sequence
+        # feats = size [10, 176, 20] = 176 char of 20 features
+        # [10, 176, 20] = batch, max_length_of_input_sentences, tags的种类
+        # B, L, T
+        batch_size, max_len, out_size = feats.size()
+
         """使用维特比算法进行解码"""
         global tag_to_id
         start_id = tag_to_id['<START>']
         end_id = tag_to_id['<END>']
         pad = tag_to_id['<PAD>']
-        tagset_size = len(tag_to_id)
 
-        crf_scores = self.forward(test_sents_tensor, test_onerad_tensor)
-        device = crf_scores.device
-        # B:batch_size, L:max_len, T:target set size
-        B, L, T, _ = crf_scores.size()
+        device = feats.device
+
+        # TODO
+
+
         # viterbi[i, j, k]表示第i个句子，第j个字对应第k个标记的最大分数
         viterbi = torch.zeros(B, L, T).to(device)
         # backpointer[i, j, k]表示第i个句子，第j个字对应第k个标记时前一个标记的id，用于回溯
@@ -987,7 +1128,7 @@ if __name__ == "__main__":
             # for drawing
             if BI_LSTM_CRF:
                 # using model.test
-                pre_tag = model.test(batch_char_index, batch_onerad_index, batch_len)
+                score, pre_tag = model.prediction(batch_char_index, batch_onerad_index)
                 all_pre.extend(pre_tag.detach().cpu().numpy().tolist())
                 all_tag.extend(batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
 

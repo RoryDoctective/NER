@@ -76,7 +76,7 @@ class BiLSTM_CRF(nn.Module):
                 torch.randn(2, 1, self.hidden_dim // 2))
 
     # total path score
-    def _forward_alg(self, feats):
+    def _forward_alg(self, feats):  # [11，5]
         # Do the forward algorithm to compute the partition function (all path score)
         # size = [1, len(tags)], value = -10000
         init_alphas = torch.full((1, self.tagset_size), -10000.)
@@ -125,7 +125,7 @@ class BiLSTM_CRF(nn.Module):
     def _score_sentence(self, feats, tags):
         # Gives the score of a provided tag sequence
         # feats = size [11,5]
-        # tags = size [11,5]
+        # tags = size [11]
         # score = size [1]
         score = torch.zeros(1)
         # self.tag_to_ix[START_TAG] = 3
@@ -139,6 +139,7 @@ class BiLSTM_CRF(nn.Module):
         tags = torch.cat([torch.tensor([self.tag_to_ix[START_TAG]], dtype=torch.long), tags])
 
         # do middle # i = 0-10
+        # feats = size[11, 5] # feat = [5]
         for i, feat in enumerate(feats):
             # Trans: tags[i] -> tags[i + 1]
             # + Emission
