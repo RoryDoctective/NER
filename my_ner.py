@@ -21,7 +21,7 @@ DATASET = 'Weibo'
 DEV = True
 
 REMOVE_O = True
-SHOW_REPORT = False
+SHOW_REPORT = True
 DRAW_GRAPH = True
 
 BI_LSTM_CRF = True
@@ -417,6 +417,11 @@ class LSTMModel(nn.Module):
     def __init__(self, char_num, embedding_num, total_rad_ids, hidden_num, class_num, bi=True):
         super().__init__()
         self.embedding = nn.Embedding(char_num, embedding_num)
+
+        # add dropout
+        # prob = 0.5 !! can be tunned
+        self.drop = nn.Dropout(0.5)
+
         if One_Radical:
             self.one_radical_embedding = nn.Embedding(total_rad_ids, 50)
             # 一层， batch在前面
@@ -448,6 +453,9 @@ class LSTMModel(nn.Module):
             embedding = torch.cat([embedding_char, embedding_onerad_0, embedding_onerad_1, embedding_onerad_2], 2)
         else:  # normal
             embedding = self.embedding(batch_char_index)
+
+        # add dropout layer
+        embedding = self.drop(embedding)
 
         # out = 每一个字的结果 = [5,4,214] = 5 batches, each batch 4 char, each char 214 hidden
         # hidden = we don't care
@@ -649,6 +657,7 @@ class LSTM_CRF_Model(nn.Module):
         gold_score = self._score_sentence(emission, batch_tag)
 
         # loss = #
+        # 520, -9980
         loss = (forward_score.sum() - gold_score.sum()) / batch_size
         return loss
 
@@ -752,7 +761,7 @@ class LSTM_CRF_Model(nn.Module):
         best_path = torch.fliplr(best_path)
 
         # remove all the pads
-        
+
         # [10], [10,176]
         return path_score, best_path
 
@@ -789,8 +798,8 @@ def final_test_BiLSTM_CRF(test_dataloader):
 
         # we do it batch by batch
         for test_batch_char_index, test_batch_tag_index, batch_len, test_batch_onerad_index in test_dataloader:
-            pre_tag = model.test(test_batch_char_index, test_batch_onerad_index, batch_len)
-            all_pre_test.extend(pre_tag.detach().cpu().numpy().tolist())
+            score, pre_tag = model.prediction(test_batch_char_index, test_batch_onerad_index)
+            all_pre_test.extend(pre_tag[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
             all_tag_test.extend(test_batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
             # get characters
             all_char_test.extend(test_batch_char_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
@@ -992,7 +1001,7 @@ if __name__ == "__main__":
         id_to_radical, total_rad_ids = dummy_radical()
 
     # training setting
-    epoch = 20
+    epoch = 2
     train_batch_size = 10
     dev_batch_size = 10
     test_batch_size = 1
@@ -1029,7 +1038,7 @@ if __name__ == "__main__":
         opt = torch.optim.AdamW(model.parameters(), lr=lr)  # Adam/AdamW
     else:
         model = LSTMModel(char_num, embedding_num, total_rad_ids, hidden_num, class_num, bi)
-        opt = torch.optim.Adam(model.parameters(), lr=lr)  # Adam/AdamW
+        opt = torch.optim.AdamW(model.parameters(), lr=lr)  # Adam/AdamW
     model = model.to(device)
 
     # draw the curve
@@ -1057,9 +1066,8 @@ if __name__ == "__main__":
             if BI_LSTM_CRF:
                 # 10, 10x176
                 score, pre_tag = model.prediction(batch_char_index, batch_onerad_index)
-                all_pre.extend(pre_tag.detach().cpu().numpy().reshape(-1).tolist())
+                all_pre.extend(pre_tag[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
                 all_tag.extend(batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
-
             else:  # LSTM
                 # score
                 all_pre.extend(model.prediction.detach().cpu().numpy().tolist())
@@ -1088,8 +1096,8 @@ if __name__ == "__main__":
                         # self-loss-added
                         dev_loss = model.forward(dev_batch_char_index, dev_batch_onerad_index, dev_batch_tag_index)
                         # using model.test
-                        pre_tag = model.test(dev_batch_char_index, dev_batch_onerad_index, batch_len)
-                        all_pre.extend(pre_tag.detach().cpu().numpy().tolist())
+                        score, pre_tag = model.prediction(dev_batch_char_index, dev_batch_onerad_index)
+                        all_pre.extend(pre_tag[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
                         all_tag.extend(dev_batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
 
                     else:  # LSTM
@@ -1107,17 +1115,17 @@ if __name__ == "__main__":
                 dev_model_lost.append(dev_loss.detach().cpu())
                 print(f'epoch:{e}, dev_f1_score:{dev_score:.5f}, dev_loss:{dev_loss:.5f}')
 
-    # # Test the model:
-    # if BI_LSTM_CRF:
-    #     final_test_BiLSTM_CRF(test_dataloader)
-    # else:
-    #     final_test_BiLSTM(test_dataloader)
+    # Test the model:
+    if BI_LSTM_CRF:
+        final_test_BiLSTM_CRF(test_dataloader)
+    else:
+        final_test_BiLSTM(test_dataloader)
 
     # save model
-    # save_model(model)
+    save_model(model)
 
     # load model
-    # load_model()
+    load_model()
 
     # draw the plot
     if DRAW_GRAPH:

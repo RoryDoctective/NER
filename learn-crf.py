@@ -289,7 +289,7 @@ if __name__ == "__main__":
 
             # Step 3. Run our forward pass.
             loss = model.neg_log_likelihood(sentence_in, targets)
-            print(loss)
+            # print(loss)
 
             # Step 4. Compute the loss, gradients, and update the parameters by
             # calling optimizer.step()
