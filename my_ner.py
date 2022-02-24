@@ -14,6 +14,11 @@ from operator import itemgetter
 import numpy as np
 import matplotlib.pyplot as plt
 import textwrap
+from ray import tune
+from ray.tune.schedulers import ASHAScheduler
+from ray.tune.suggest import ConcurrencyLimiter
+from ray.tune.suggest.hyperopt import HyperOptSearch
+from ray.tune.suggest.bayesopt import BayesOptSearch
 
 # global:
 # Weibo, Resume, MSRA(no_dev), Literature(error), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
@@ -24,7 +29,7 @@ REMOVE_O = True
 SHOW_REPORT = True
 DRAW_GRAPH = True
 
-BI_LSTM_CRF = True
+BI_LSTM_CRF = False
 
 One_Radical = False
 Three_Radicals = False
@@ -524,6 +529,7 @@ class LSTM_CRF_Model(nn.Module):
         # to the start tag and we never transfer from the stop tag
         self.transition.data[tag_to_id['<START>'], :] = -10000
         self.transition.data[:, tag_to_id['<END>']] = -10000
+        self.transition.data[tag_to_id['<PAD>'], tag_to_id['<END>']] = 0.05
 
     # emission score
     def _get_lstm_features(self, batch_data, batch_onerad):
@@ -588,9 +594,11 @@ class LSTM_CRF_Model(nn.Module):
                 alphas_t.append(log_sum_exp(next_tag_var).view(batch_size, -1))
             # size [10,1,20]
             forward_var = torch.cat(alphas_t, 1).view(batch_size, 1, out_size)
-        # i (all s) -> STOP
-        terminal_var = forward_var + self.transition[tag_to_id['<END>']].expand(batch_size, 1, out_size)
+        """to end is not needed"""
+        # # i (all s) -> STOP
+        # terminal_var = forward_var + self.transition[tag_to_id['<END>']].expand(batch_size, 1, out_size)
         # final
+        terminal_var = forward_var
         alpha = log_sum_exp(terminal_var)
         # size = [10, 1]
         return alpha
@@ -626,18 +634,20 @@ class LSTM_CRF_Model(nn.Module):
         for i, feat in enumerate(feats):
             # emission
             emission = []
-            for j in range(batch_size):
+            for j in range(batch_size):  # TODO
                 emission.append(feat[j][tags[:, i + 1][j]].view(1,-1))
             # size = [10,1]
             emission = torch.cat(emission, 0).reshape(-1)
 
             # Trans: tags[i] -> tags[i + 1] ; size[10]
-            # + Emission size[10] TODO feat[:, tags[:, i + 1]]
+            # + Emission size[10]
             _score = _score + \
                 self.transition[tags[:, i + 1], tags[:, i]] + emission
 
-        # add end : tran: 2->4, last tag to end tag
-        _score = _score + self.transition[torch.tensor(tag_to_id['<END>'], dtype=torch.long).expand(batch_size), tags[:, -1]]
+        """this end tag is not needed"""
+        # # add end : tran: 2->4, last tag to end tag
+        # _score = _score + self.transition[torch.tensor(tag_to_id['<END>'], dtype=torch.long).expand(batch_size), tags[:, -1]]
+
         # size[10, 1]
         return _score.view(-1, 1)
 
@@ -732,10 +742,12 @@ class LSTM_CRF_Model(nn.Module):
             # bptrs_t size: [200] -> [20, 10] -> [10, 20]
             backpointers.append(torch.transpose((torch.cat(bptrs_t)).view(out_size, batch_size), 0, 1))
 
-        # Transition to STOP_TAG
-        # size: [10, 20]
-        terminal_var = forward_var + self.transition[end_id].expand(batch_size, out_size)
+        """not need for end tag"""
+        # # Transition to STOP_TAG
+        # # size: [10, 20]
+        # terminal_var = forward_var + self.transition[end_id].expand(batch_size, out_size)
         # [10], [10]
+        terminal_var = forward_var
         path_score, best_tag_id = torch.max(terminal_var, 1)
 
         # Follow the back pointers to decode the best path.
@@ -971,6 +983,132 @@ def draw_plot(train_f1, train_loss_, dev_f1, dev_loss_, model_='LSTM', dataset_=
     plt.show()
 
 
+def train_search(config, checkpoint_dir=None):
+    # config =
+    # embedding num  # reduce 0-300
+    # hidden_num  # reduce 100-300
+    # lr  # 0.001
+    # epoch  # 20
+
+    # init
+    class_num = len(tag_to_id)
+
+    # training setting
+    train_batch_size = 10
+    dev_batch_size = 10
+    test_batch_size = 1
+    bi = True
+
+
+    # Data Setup
+    # no shuffle ordered by the len of sentence
+    # need to add padding, thus use self-defined collate_fn function
+    train_dataset = MyDataset(train_data, train_tag, char_to_index, tag_to_id, id_to_radical)
+    train_dataloader = DataLoader(train_dataset, train_batch_size, shuffle=False,
+                                  collate_fn=train_dataset.pro_batch_data)
+
+    # evaluation
+    if DEV:
+        dev_dataset = MyDataset(dev_data, dev_tag, char_to_index, tag_to_id, id_to_radical)
+        dev_dataloader = DataLoader(dev_dataset, dev_batch_size, shuffle=False,
+                                    collate_fn=dev_dataset.pro_batch_data)
+
+    # test data
+    test_dataset = MyDataset(test_data, test_tag, char_to_index, tag_to_id, id_to_radical)
+    test_dataloader = DataLoader(test_dataset, test_batch_size, shuffle=False,
+                                 collate_fn=test_dataset.pro_batch_data)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # SETTING
+    if BI_LSTM_CRF:
+        model = LSTM_CRF_Model(char_num, config["embedding_num"], total_rad_ids, config["hidden_num"], class_num, bi)
+        opt = torch.optim.AdamW(model.parameters(), lr=0.001)  # Adam/AdamW
+    else:
+        model = LSTMModel(char_num, config["embedding_num"], total_rad_ids, config["hidden_num"], class_num, bi)
+        opt = torch.optim.AdamW(model.parameters(), lr=0.001)  # Adam/AdamW
+    model = model.to(device)
+
+    # draw the curve
+    train_model_f1 = []
+    train_model_lost = []
+    dev_model_f1 = []
+    dev_model_lost = []
+
+    for e in range(25):
+        # train
+        model.train()
+
+        # need to recall all for draw
+        all_pre = []
+        all_tag = []
+
+        for batch_char_index, batch_tag_index, batch_len, batch_onerad_index in train_dataloader:
+            # both of them already in cuda
+            train_loss = model.forward(batch_char_index, batch_onerad_index, batch_tag_index)
+            train_loss.backward()
+            opt.step()
+            opt.zero_grad()
+            # for drawing
+            if BI_LSTM_CRF:
+                # 10, 10x176
+                score, pre_tag = model.prediction(batch_char_index, batch_onerad_index)
+                all_pre.extend(pre_tag[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
+                all_tag.extend(batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
+            else:  # LSTM
+                # score
+                all_pre.extend(model.prediction.detach().cpu().numpy().tolist())
+                # reshape(-1): 一句话里面很多字，全部拉平
+                all_tag.extend(batch_tag_index.detach().cpu().numpy().reshape(-1).tolist())
+
+        # calculate score
+        train_score = f1_score(all_tag, all_pre, average='micro')  # micro/多类别的
+        train_model_f1.append(train_score)
+        train_model_lost.append(train_loss.detach().cpu())
+        # print(f'train_loss:{train_loss:.3f}')
+        print(f'epoch:{e}, train_f1_score:{train_score:.5f}, train_loss:{train_loss:.5f}')
+
+        if DEV:
+            # evaluation
+            model.eval()  # F1, acc, recall, F1 score
+            # 验证时不做更新
+            with torch.no_grad():  # detach
+                # need to recall all of them
+                all_pre = []
+                all_tag = []
+
+                # we do it batch by batch
+                for dev_batch_char_index, dev_batch_tag_index, batch_len, dev_batch_onerad_index in dev_dataloader:
+                    if BI_LSTM_CRF:
+                        # self-loss-added
+                        dev_loss = model.forward(dev_batch_char_index, dev_batch_onerad_index, dev_batch_tag_index)
+                        # using model.test
+                        score, pre_tag = model.prediction(dev_batch_char_index, dev_batch_onerad_index)
+                        all_pre.extend(pre_tag[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
+                        all_tag.extend(dev_batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
+
+                    else:  # LSTM
+                        # loss
+                        dev_loss = model.forward(dev_batch_char_index, dev_batch_onerad_index, dev_batch_tag_index)
+                        # score
+                        all_pre.extend(model.prediction.detach().cpu().numpy().tolist())
+                        # reshape(-1): 一句话里面很多字，全部拉平
+                        all_tag.extend(dev_batch_tag_index.detach().cpu().numpy().reshape(-1).tolist())
+
+                # calculate score
+                dev_score = f1_score(all_tag, all_pre, average='micro')  # micro/多类别的
+                # print('score')
+                dev_model_f1.append(dev_score)
+                dev_model_lost.append(dev_loss.detach().cpu())
+                print(f'epoch:{e}, dev_f1_score:{dev_score:.5f}, dev_loss:{dev_loss:.5f}')
+
+
+    # Send the current training result back to Tune
+    tune.report(mean_accuracy=sum(dev_model_f1)/len(dev_model_f1))
+    # TODO save more
+    # Graph
+
+
 if __name__ == "__main__":
     # pre-setting
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
@@ -1000,8 +1138,36 @@ if __name__ == "__main__":
     else:  # create dummy
         id_to_radical, total_rad_ids = dummy_radical()
 
+    """ place for parameter tuning """
+    search_space = {
+        # "lr": tune.loguniform(1e-5, 1e-1),
+        # tune.sample_from(lambda spec: 10 ** (-10 * np.random.rand())),
+        "embedding_num": tune.qrandint(20, 400, 30),
+        "hidden_num": tune.qrandint(20, 400, 30),
+        # "epoch": tune.randint(15, 25)
+    }
+    # algo = BayesOptSearch(utility_kwargs={
+    #     "kind": "ucb",
+    #     "kappa": 2.5,
+    #     "xi": 0.0
+    # })
+    # algo = ConcurrencyLimiter(algo, max_concurrent=4)
+    analysis = tune.run(
+        train_search,
+        num_samples=20,
+        scheduler=ASHAScheduler(metric="mean_accuracy", mode="max"),
+        search_alg=tune.suggest.BasicVariantGenerator(),
+        config=search_space,
+        resources_per_trial={'gpu': 1}
+    )
+    print("Best hyperparameters found were: ", analysis.best_config)
+    dfs = analysis.trial_dataframes
+    [d.mean_accuracy.plot() for d in dfs.values()]
+
+    exit()
+
     # training setting
-    epoch = 2
+    epoch = 20
     train_batch_size = 10
     dev_batch_size = 10
     test_batch_size = 1
