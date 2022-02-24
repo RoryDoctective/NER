@@ -203,9 +203,13 @@ class BiLSTM_CRF(nn.Module):
         path_score = terminal_var[0][best_tag_id]
 
         # Follow the back pointers to decode the best path.
+        # [1]
         best_path = [best_tag_id]
-        for bptrs_t in reversed(backpointers):
+        # backpointers [11, 5]
+        for bptrs_t in reversed(backpointers):  # [5]
+            # list[5], int(1)
             best_tag_id = bptrs_t[best_tag_id]
+            # append int(1)
             best_path.append(best_tag_id)
         # Pop off the start tag (we dont want to return that to the caller)
         start = best_path.pop()
@@ -295,5 +299,6 @@ if __name__ == "__main__":
     # Check predictions after training
     with torch.no_grad():
         precheck_sent = prepare_sequence(training_data[0][0], word_to_ix)
+        print(precheck_sent)
         print(model(precheck_sent))
     # We got it!
