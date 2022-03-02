@@ -1,7 +1,6 @@
 # D:\download\anaconda\envs\ner\python.exe
 # -*- coding:utf-8 -*-
-# time: 2021/11/25
-
+# time: 2022/3/2
 # the codes are learnt from https://github.com/shouxieai/nlp-bilstm_crf-ner
 
 import os
@@ -558,59 +557,48 @@ class LSTM_CRF_Model(nn.Module):
 
     # total path score
     def _forward_alg(self, feats):
-        # cup/gpu
         device = feats.device
+
         # [10, 176, 20] = batch, max_length_of_input_sentences, tags的种类
         batch_size, max_len, out_size = feats.size()
-
         # Do the forward algorithm to compute the partition function (all path score)
         # size = [batch_size, len(tags)], value = -10000
-        # size = [20, 10]
-        init_alphas = torch.full((out_size, batch_size), -10000.)
+        init_alphas = torch.full((batch_size, 1, out_size), -10000.)
         # START_TAG has all of the score.
-        init_alphas[tag_to_id['<START>'], :] = 0.
+        init_alphas[:, :, tag_to_id['<START>']] = 0.
 
         # Wrap in a variable so that we will get automatic backprop
-        # [20, 10]
-        forward_var_list = []
-        forward_var_list.append(init_alphas)
-        # forward_var = init_alphas.to(device)
+        # [10, 1, 20]
+        forward_var = init_alphas.to(device)
 
         # swap dimension of the feats
-        # [10, 176, 20] -> [176, 10, 20] -> [176, 20, 10]
-        feats = torch.transpose(feats, 0, 1).transpose(1, 2)
-
-        for feat_index in range(feats.shape[0]):  # = in range 0-175 (176)
-            # get the init_alpha [20, 10]
-            # init_alpha  * len(tags) = [ 20 same tensors]
-            # [tensor([-10000., -10000., -10000.,      0., -10000.]),
-            #  tensor([-10000., -10000., -10000.,      0., -10000.]),
-            #  tensor([-10000., -10000., -10000.,      0., -10000.]),
-            #  tensor([-10000., -10000., -10000.,      0., -10000.]),
-            #  tensor([-10000., -10000., -10000.,      0., -10000.])]
-            # stack -> tensor size = [20(feats.shape[1]), 20, 10]
-            # final size [20 copy , 20 num, 10 batch]
-            # (get forward score)
-            gamar_r_l = torch.stack([forward_var_list[feat_index]] * feats.shape[1]).to(device)
-            # get the size = [20,10]
-            # size= [1,20,10] -> [1 copy, 20 num, 10 batch]
-            # size = [20,1,10]
-            # (get emit score)
-            t_r1_k = torch.unsqueeze(feats[feat_index], 0).transpose(0, 1).to(device)
-            # self.transitions = size [20,20]
-            # [20, 20, 10] + [20, 1, 10] + [20, 20, 10]
-            # aa = (forward_var + trans_score + emit_score) = size = [5,5]
-            aa = gamar_r_l + t_r1_k + torch.unsqueeze(self.transition, 2).expand(out_size, out_size, batch_size)
-            # cal logsumexp, dim = 1
-            # e.g. [3,4] dim = 1 -> [3]
-            # [5,5] -> 5
-            # [20, 20, 10] -> [20, 10]
-            forward_var_list.append(torch.logsumexp(aa, dim=1))
+        # [10, 176, 20] -> [176, 10, 20]
+        feats = torch.transpose(feats, 0, 1)
+        # Iterate through the sentence
+        for feat in feats:  # feat size = [10,20]
+            alphas_t = []  # The forward tensors at this timestep
+            for next_tag in range(out_size):
+                # broadcast the emission score: it is the same regardless of the previous tag
+                # size of [10] -> [10,1,1] -> [10, 1, 20]
+                emit_score = feat[:, next_tag].view(batch_size, 1, -1).expand(batch_size, 1, out_size)
+                # the ith entry of trans_score = the score of transitioning to next_tag from i
+                # i(all i s) -> next_tag
+                # size [20] ->  [10, 1, 20]
+                trans_score = self.transition[next_tag].expand(batch_size, 1, out_size)
+                # The ith entry of next_tag_var = the value for the edge (i -> next_tag) before we do log-sum-exp
+                # size = [10, 1, 20]
+                next_tag_var = forward_var + trans_score + emit_score
+                # The forward variable for this tag = log-sum-exp of all the scores.
+                # size = [10,1] # TODO
+                alphas_t.append(log_sum_exp(next_tag_var).view(batch_size, -1))
+            # size [10,1,20]
+            forward_var = torch.cat(alphas_t, 1).view(batch_size, 1, out_size)
         """to end is not needed"""
         # # i (all s) -> STOP
-        # terminal_var = forward_var + self.transition[tag_to_id['<END>']].expand(out_size, batch_size)
-        # terminal_var = forward_var_list[-1] = size [20,10] -> [10] -> [10,1]
-        alpha = torch.unsqueeze(torch.logsumexp(forward_var_list[-1], dim=0), 1)
+        # terminal_var = forward_var + self.transition[tag_to_id['<END>']].expand(batch_size, 1, out_size)
+        # final
+        terminal_var = forward_var
+        alpha = log_sum_exp(terminal_var)
         # size = [10, 1]
         return alpha
 
@@ -679,9 +667,9 @@ class LSTM_CRF_Model(nn.Module):
 
         # loss = #
         # 520, -9980
-        # 518, -2.77
+        # 519 -17
         loss = (forward_score.sum() - gold_score.sum()) / batch_size
-        # print(loss)
+        print(loss)
         return loss
 
     def prediction(self, test_sents_tensor, test_onerad_tensor):
@@ -1181,7 +1169,7 @@ if __name__ == "__main__":
     """ place for parameter tuning """
 
     # training setting
-    epoch = 8
+    epoch = 20
     train_batch_size = 10
     dev_batch_size = 10
     test_batch_size = 1
