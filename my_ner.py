@@ -19,8 +19,12 @@ from ray.tune.schedulers import ASHAScheduler
 from ray.tune.suggest import ConcurrencyLimiter
 from ray.tune.suggest.hyperopt import HyperOptSearch
 from ray.tune.suggest.bayesopt import BayesOptSearch
+import cProfile
 
 # global:
+PROFILER = False
+SAVE_MODEL = True
+
 # Weibo, Resume, MSRA(no_dev), Literature(error), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
 DATASET = 'Weibo'
 DEV = True
@@ -642,13 +646,20 @@ class LSTM_CRF_Model(nn.Module):
         # do middle
         # # feats = size [176, 10, 20]
         # feat = [10,20] ; i = 0-175
+        # tags = [10,177]
         for i, feat in enumerate(feats):
-            # emission
-            emission = []
-            for j in range(batch_size):  # TODO
-                emission.append(feat[j][tags[:, i + 1][j]].view(1,-1))
-            # size = [10,1]
-            emission = torch.cat(emission, 0).reshape(-1)
+            # alter
+            # 10 ids # TODO
+            ids = tags[:, i + 1]
+            emission = [f[x] for f, x in zip(feat, ids)]
+            emission = torch.stack(emission)
+
+            # # emission
+            # emission = []
+            # for j in range(batch_size):
+            #     emission.append(feat[j][tags[:, i + 1][j]].view(1,-1))
+            # # size = [10,1]
+            # emission = torch.cat(emission, 0).reshape(-1)
 
             # Trans: tags[i] -> tags[i + 1] ; size[10]
             # + Emission size[10]
@@ -714,67 +725,65 @@ class LSTM_CRF_Model(nn.Module):
         # In[4]: torch.full((1, 3), -10000.)
         # Out[4]: tensor([[-10000., -10000., -10000.]])
         # size = (1,3)
-        # size = (10,20)
-        init_vvars = torch.full((batch_size, out_size), -10000.)
+        # size = (20,10)
+        init_vvars = torch.full((out_size, batch_size), -10000.)
         # start = 0
-        # size = (10,20)
-        init_vvars[:, start_id] = 0
+        # size = (20,10)
+        init_vvars[start_id, :] = 0
         # forward_var at step i holds the viterbi variables for step i-1
         # = previous
-        forward_var = init_vvars.to(device)
+        forward_var_list = []
+        forward_var_list.append(init_vvars)
 
         # swap dimension of the feats
-        # [10, 176, 20] -> [176, 10, 20]
-        feats = torch.transpose(feats, 0, 1)
+        # [10, 176, 20] -> [176, 10, 20] -> [176, 20, 10]
+        feats = torch.transpose(feats, 0, 1).transpose(1, 2)
 
-        for feat in feats:  # [batch_size, out_size]/ [10,20]
-            # list of best-tag-index
-            bptrs_t = []  # holds the backpointers for this step
-            # list of tensors of scores
-            viterbivars_t = []  # holds the viterbi variables for this step
+        for feat_index in range(feats.shape[0]):  # = in range 0-175 (176)
+            # get init_vvars [20, 10]
+            # [20, 10]* 20 = [20, [20, 10]]
+            gamar_r_l = torch.stack([forward_var_list[feat_index]] * feats.shape[1]).to(device)
+            # [20, 20, 10] + [20, 20]
+            next_tag_var = gamar_r_l + torch.unsqueeze(self.transition, 2).expand(out_size, out_size, batch_size)
+            # torch.return_types.max(
+            # values=tensor([-8.0409e-01,  3.7508e-01, -1.3341e+00, -1.0000e+04, -6.9211e-01]),
+            # indices=tensor([3, 3, 3, 3, 3]))
+            # [20,10], [20,10]
+            viterbivars_t, bptrs_t = torch.max(next_tag_var, dim=1)
+            # [20,10]
+            t_r1_k = feats[feat_index]
+            forward_var_new = viterbivars_t + t_r1_k
+            forward_var_list.append(forward_var_new)
+            # add list
+            backpointers.append(bptrs_t.tolist())
 
-            for next_tag in range(out_size):  # tag' index, 0 ~ len(tags)
-                # next_tag_var[i] holds the viterbi variable for tag i at the
-                # previous step, plus the score of transitioning
-                # from tag i to next_tag.
-                # We don't include the emission scores here because the max
-                # does not depend on them (we add them in below)
-                # size = (10,20)
-                next_tag_var = forward_var + self.transition[next_tag].expand(batch_size, out_size)
-
-                # index, e.g. 3/ [3,3,3,3,3,3,3,3,3,3]
-                best_tag_value, best_tag_id = torch.max(next_tag_var, 1)
-                # record [10]
-                bptrs_t.append(best_tag_id)
-                viterbivars_t.append(best_tag_value)
-
-            # Now add in the emission scores, and assign forward_var to the set
-            # of viterbi variables we just computed
-            # size: [200] -> [20, 10] -> [10, 20]
-            forward_var = torch.transpose((torch.cat(viterbivars_t)).view(out_size, batch_size), 0, 1) + feat
-            # bptrs_t size: [200] -> [20, 10] -> [10, 20]
-            backpointers.append(torch.transpose((torch.cat(bptrs_t)).view(out_size, batch_size), 0, 1))
 
         """not need for end tag"""
         # # Transition to STOP_TAG
-        # # size: [10, 20]
+        # # size: [20, 10]
         # terminal_var = forward_var + self.transition[end_id].expand(batch_size, out_size)
+        terminal_var = forward_var_list[-1]
         # [10], [10]
-        terminal_var = forward_var
-        path_score, best_tag_id = torch.max(terminal_var, 1)
+        path_score, best_tag_id = torch.max(terminal_var, 0)
 
         # Follow the back pointers to decode the best path.
         # [[10], ....] -> final [20, 10]
         best_path = [best_tag_id]
-        # backpointers [176, 10, 20]
-        for bptrs_t in reversed(backpointers):  # [10, 20]
-            # bptrs_t is a [10x20] tensor
+        # backpointers [176, 20, 10]
+        for bptrs_t in reversed(backpointers):  # [20, 10]
+            # bptrs_t is a [20x10] list
+            # -> [10, 20] tensor
+            bptrs_t = torch.tensor(bptrs_t).transpose(0,1).to(device)
             # best_tag_id is a [10] tensor
-            temp = []
-            for j in range(batch_size):
-                temp.append(bptrs_t[j][best_tag_id[j]].view(1, -1))
-            # size [10]
-            best_tag_id = torch.cat(temp, 0).reshape(-1)
+            best_tag_id = [p[id] for p, id in zip(bptrs_t, best_tag_id)]
+            # [10]
+            best_tag_id = torch.stack(best_tag_id)
+
+            # temp = []
+            # for j in range(batch_size):
+            #     temp.append(bptrs_t[j][best_tag_id[j]].view(1, -1))
+            # # size [10]
+            # best_tag_id = torch.cat(temp, 0).reshape(-1)
             best_path.append(best_tag_id)
 
         # Pop off the start tag (we dont want to return that to the caller)
@@ -782,7 +791,7 @@ class LSTM_CRF_Model(nn.Module):
         assert torch.equal(start, torch.tensor(start_id).expand(batch_size).to(device))  # Sanity check
 
         # size [176,10] -> [10, 176]
-        best_path = torch.transpose((torch.cat(best_path)).view(max_len, batch_size), 0, 1)
+        best_path = torch.transpose((torch.stack(best_path)), 0, 1)
         best_path = torch.fliplr(best_path)
 
         # remove all the pads
@@ -1180,6 +1189,12 @@ if __name__ == "__main__":
     # exit()
     """ place for parameter tuning """
 
+    ''' place for profile'''
+    if PROFILER:
+        pr = cProfile.Profile()
+        pr.enable()
+    ''' end of profile '''
+
     # training setting
     epoch = 8
     train_batch_size = 10
@@ -1301,11 +1316,18 @@ if __name__ == "__main__":
     else:
         final_test_BiLSTM(test_dataloader)
 
-    # save model
-    save_model(model)
+    if PROFILER:
+        # profile
+        pr.disable()
+        # after your program ends
+        pr.print_stats(sort="tottime")
 
-    # load model
-    load_model()
+    if SAVE_MODEL:
+        # save model
+        save_model(model)
+
+        # load model
+        load_model()
 
     # draw the plot
     if DRAW_GRAPH:

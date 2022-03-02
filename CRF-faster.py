@@ -48,6 +48,7 @@ class BiLSTM_CRF(nn.Module):
                 torch.randn(2, 1, self.hidden_dim // 2))
 
     # changed size
+    # done
     def _forward_alg(self, feats):
         # Do the forward algorithm to compute the partition function
         '''
@@ -113,6 +114,7 @@ class BiLSTM_CRF(nn.Module):
         lstm_feats = self.hidden2tag(lstm_out)
         return lstm_feats
 
+    # same
     def _score_sentence(self, feats, tags):
         # Gives the score of a provided tag sequence
         score = torch.zeros(1)
@@ -126,34 +128,56 @@ class BiLSTM_CRF(nn.Module):
     def _viterbi_decode(self, feats):
         backpointers = []
         # Initialize the viterbi variables in log space
+        # Initialize the viterbi variables in log space
+        # In[4]: torch.full((1, 3), -10000.)
+        # Out[4]: tensor([[-10000., -10000., -10000.]])
+        # size = (1,3)
         init_vvars = torch.full((1, self.tagset_size), -10000.)
+        # start = 0
+        # [1, len(tags)]
         init_vvars[0][self.tag_to_ix[START_TAG]] = 0
 
         # forward_var at step i holds the viterbi variables for step i-1
         forward_var_list = []
         forward_var_list.append(init_vvars)
 
-        for feat_index in range(feats.shape[0]):
+        # feats: 11 char of 5 features = [11,5]
+        for feat_index in range(feats.shape[0]):  # 0-10 / 11
+            # get init_vvars [1, 5]
+            # [1,5]* 5 = [5, [1, 5]]
             gamar_r_l = torch.stack([forward_var_list[feat_index]] * feats.shape[1])
+            # [5, [1, 5]] -> [5,5]
             gamar_r_l = torch.squeeze(gamar_r_l)
+            # [5,5] + [5,5]
             next_tag_var = gamar_r_l + self.transitions
+            # torch.return_types.max(
+            # values=tensor([-8.0409e-01,  3.7508e-01, -1.3341e+00, -1.0000e+04, -6.9211e-01]),
+            # indices=tensor([3, 3, 3, 3, 3]))
             viterbivars_t,bptrs_t = torch.max(next_tag_var,dim=1)
-
+            # [5] -> [1,5]
             t_r1_k = torch.unsqueeze(feats[feat_index], 0)
+            # [5] -> [1,5]
+            # [1,5] + [1,5]
             forward_var_new = torch.unsqueeze(viterbivars_t,0) + t_r1_k
-
+            # new [1,5]
             forward_var_list.append(forward_var_new)
+            # add list
             backpointers.append(bptrs_t.tolist())
 
         # Transition to STOP_TAG
+        # forward_var_list[-1] = forward_var
+        # size: [1, 5]
         terminal_var = forward_var_list[-1] + self.transitions[self.tag_to_ix[STOP_TAG]]
         best_tag_id = torch.argmax(terminal_var).tolist()
         path_score = terminal_var[0][best_tag_id]
 
         # Follow the back pointers to decode the best path.
+        # backpointers [11, 5]
         best_path = [best_tag_id]
-        for bptrs_t in reversed(backpointers):
+        for bptrs_t in reversed(backpointers):  # [5]
+            # list[5], int(1)
             best_tag_id = bptrs_t[best_tag_id]
+            # append int(1)
             best_path.append(best_tag_id)
         # Pop off the start tag (we dont want to return that to the caller)
         start = best_path.pop()
