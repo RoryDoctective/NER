@@ -22,6 +22,7 @@ from ray.tune.suggest.bayesopt import BayesOptSearch
 import cProfile
 
 # global:
+TUNE = False
 PROFILER = False
 SAVE_MODEL = True
 
@@ -1161,32 +1162,33 @@ if __name__ == "__main__":
         id_to_radical, total_rad_ids = dummy_radical()
 
     """ place for parameter tuning """
-    # search_space = {
-    #     # "lr": tune.loguniform(1e-5, 1e-1),
-    #     # tune.sample_from(lambda spec: 10 ** (-10 * np.random.rand())),
-    #     "embedding_num": tune.qrandint(20, 400, 30),
-    #     "hidden_num": tune.qrandint(20, 400, 30),
-    #     # "epoch": tune.randint(15, 25)
-    # }
-    # # algo = BayesOptSearch(utility_kwargs={
-    # #     "kind": "ucb",
-    # #     "kappa": 2.5,
-    # #     "xi": 0.0
-    # # })
-    # # algo = ConcurrencyLimiter(algo, max_concurrent=4)
-    # analysis = tune.run(
-    #     train_search,
-    #     num_samples=20,
-    #     scheduler=ASHAScheduler(metric="mean_accuracy", mode="max"),
-    #     search_alg=tune.suggest.BasicVariantGenerator(),
-    #     config=search_space,
-    #     resources_per_trial={'gpu': 1}
-    # )
-    # print("Best hyperparameters found were: ", analysis.best_config)
-    # dfs = analysis.trial_dataframes
-    # [d.mean_accuracy.plot() for d in dfs.values()]
-    #
-    # exit()
+    if TUNE:
+        search_space = {
+            # "lr": tune.loguniform(1e-5, 1e-1),
+            # tune.sample_from(lambda spec: 10 ** (-10 * np.random.rand())),
+            "embedding_num": tune.qrandint(20, 400, 30),
+            "hidden_num": tune.qrandint(20, 400, 30),
+            # "epoch": tune.randint(15, 25)
+        }
+        # algo = BayesOptSearch(utility_kwargs={
+        #     "kind": "ucb",
+        #     "kappa": 2.5,
+        #     "xi": 0.0
+        # })
+        # algo = ConcurrencyLimiter(algo, max_concurrent=4)
+        analysis = tune.run(
+            train_search,
+            num_samples=20,
+            scheduler=ASHAScheduler(metric="mean_accuracy", mode="max"),
+            search_alg=tune.suggest.BasicVariantGenerator(),
+            config=search_space,
+            resources_per_trial={'gpu': 1}
+        )
+        print("Best hyperparameters found were: ", analysis.best_config)
+        dfs = analysis.trial_dataframes
+        [d.mean_accuracy.plot() for d in dfs.values()]
+
+        exit()
     """ place for parameter tuning """
 
     ''' place for profile'''
@@ -1196,7 +1198,7 @@ if __name__ == "__main__":
     ''' end of profile '''
 
     # training setting
-    epoch = 8
+    epoch = 20
     train_batch_size = 10
     dev_batch_size = 10
     test_batch_size = 1
