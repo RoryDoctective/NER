@@ -777,7 +777,7 @@ class LSTM_CRF_Model(nn.Module):
             # bptrs_t is a [20x10] list
             # -> [10, 20] tensor
             bptrs_t = torch.tensor(bptrs_t).transpose(0,1).to(device)
-            # best_tag_id is a [10] tensor
+            # best_tag_id is a [10] tensor # TODO
             best_tag_id = [p[id] for p, id in zip(bptrs_t, best_tag_id)]
             # [10]
             best_tag_id = torch.stack(best_tag_id)
