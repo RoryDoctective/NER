@@ -19,10 +19,12 @@ from ray.tune.schedulers import ASHAScheduler
 from ray.tune.suggest import ConcurrencyLimiter
 from ray.tune.suggest.hyperopt import HyperOptSearch
 from ray.tune.suggest.bayesopt import BayesOptSearch
+import pandas as pd
 import cProfile
 
 # global:
-TUNE = False
+TUNE = True
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 PROFILER = False
 SAVE_MODEL = True
 
@@ -1080,7 +1082,8 @@ def train_search(config, checkpoint_dir=None):
                 all_tag.extend(batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
             else:  # LSTM
                 # score
-                all_pre.extend(model.prediction.detach().cpu().numpy().tolist())
+                temp = model.prediction.detach().cpu()
+                all_pre.extend(temp.numpy().tolist())
                 # reshape(-1): 一句话里面很多字，全部拉平
                 all_tag.extend(batch_tag_index.detach().cpu().numpy().reshape(-1).tolist())
 
@@ -1127,8 +1130,20 @@ def train_search(config, checkpoint_dir=None):
 
 
     # Send the current training result back to Tune
-    tune.report(mean_accuracy=sum(dev_model_f1)/len(dev_model_f1))
-    # TODO save more
+    # tune.report(
+    #     mean_train_loss=(sum(train_model_lost)/len(train_model_lost)).item(),
+    #     mean_train_f1=sum(train_model_f1)/len(train_model_f1),
+    #     mean_dev_loss=(sum(dev_model_lost)/len(dev_model_lost)).item(),
+    #     mean_dev_f1=sum(dev_model_f1)/len(dev_model_f1)
+    # )
+
+    tune.report(
+        last_train_loss=train_model_lost[-1].item(),
+        last_train_f1=train_model_f1[-1],
+        last_dev_loss=dev_model_lost[-1].item(),
+        last_dev_f1=dev_model_f1[-1])
+
+    # TODO
     # Graph
 
 
@@ -1166,8 +1181,12 @@ if __name__ == "__main__":
         search_space = {
             # "lr": tune.loguniform(1e-5, 1e-1),
             # tune.sample_from(lambda spec: 10 ** (-10 * np.random.rand())),
-            "embedding_num": tune.qrandint(20, 400, 30),
-            "hidden_num": tune.qrandint(20, 400, 30),
+            # "embedding_num": tune.qrandint(20, 400, 30),
+            "embedding_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400]), # ]),#
+            # "embedding_num": tune.grid_search([250]),
+            # "hidden_num": tune.qrandint(20, 400, 30),
+            # "hidden_num": tune.grid_search([300]),
+            "hidden_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400]),
             # "epoch": tune.randint(15, 25)
         }
         # algo = BayesOptSearch(utility_kwargs={
@@ -1178,15 +1197,34 @@ if __name__ == "__main__":
         # algo = ConcurrencyLimiter(algo, max_concurrent=4)
         analysis = tune.run(
             train_search,
-            num_samples=20,
-            scheduler=ASHAScheduler(metric="mean_accuracy", mode="max"),
+            num_samples=1,
+            scheduler=ASHAScheduler(
+                metric="last_dev_f1",
+                mode="max"
+            ),
             search_alg=tune.suggest.BasicVariantGenerator(),
             config=search_space,
             resources_per_trial={'gpu': 1}
         )
-        print("Best hyperparameters found were: ", analysis.best_config)
-        dfs = analysis.trial_dataframes
-        [d.mean_accuracy.plot() for d in dfs.values()]
+        print("Best hyperparameters found were: ",
+              analysis.get_best_config(
+                  metric='last_dev_f1',
+                  mode='max'
+              )
+              )
+        # Get a dataframe for the last reported results of all of the trials
+        df = analysis.results_df
+        df.to_csv('Tune/results_df_raw.csv')
+
+        # # Get a dict mapping {trial logdir -> dataframes} for all trials in the experiment.
+        # all_dataframes = analysis.trial_dataframes
+        # all_dataframes.to_csv('Tune/trial_dataframes.csv')
+        #
+        # # Get a list of trials
+        # trials = analysis.trials
+        #
+        # dfs = analysis.trial_dataframes
+        # [d.mean_accuracy.plot() for d in dfs.values()]
 
         exit()
     """ place for parameter tuning """
@@ -1198,14 +1236,14 @@ if __name__ == "__main__":
     ''' end of profile '''
 
     # training setting
-    epoch = 20
+    epoch = 25
     train_batch_size = 10
     dev_batch_size = 10
     test_batch_size = 1
     # reduce 0-300
-    embedding_num = 200
+    embedding_num = 300
     ## reduce 100-300
-    hidden_num = 200  # one direction ; bi-drectional = 2 * hidden
+    hidden_num = 400  # one direction ; bi-drectional = 2 * hidden
     bi = True
     # both direction
     lr = 0.001
@@ -1267,7 +1305,9 @@ if __name__ == "__main__":
                 all_tag.extend(batch_tag_index[:, :-1].detach().cpu().numpy().reshape(-1).tolist())
             else:  # LSTM
                 # score
-                all_pre.extend(model.prediction.detach().cpu().numpy().tolist())
+                # all_pre.extend(model.prediction.detach().cpu().numpy().tolist())
+                temp = model.prediction.detach().cpu()
+                all_pre.extend(temp.numpy().tolist())
                 # reshape(-1): 一句话里面很多字，全部拉平
                 all_tag.extend(batch_tag_index.detach().cpu().numpy().reshape(-1).tolist())
 
@@ -1301,7 +1341,9 @@ if __name__ == "__main__":
                         # loss
                         dev_loss = model.forward(dev_batch_char_index, dev_batch_onerad_index, dev_batch_tag_index)
                         # score
-                        all_pre.extend(model.prediction.detach().cpu().numpy().tolist())
+                        temp = model.prediction.detach().cpu()
+                        all_pre.extend(temp.numpy().tolist())
+                        # all_pre.extend(model.prediction.detach().cpu().numpy().tolist())
                         # reshape(-1): 一句话里面很多字，全部拉平
                         all_tag.extend(dev_batch_tag_index.detach().cpu().numpy().reshape(-1).tolist())
 
