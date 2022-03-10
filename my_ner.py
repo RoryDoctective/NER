@@ -24,7 +24,7 @@ import cProfile
 
 # global:
 TUNE = True
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 PROFILER = False
 SAVE_MODEL = True
 
@@ -36,7 +36,7 @@ REMOVE_O = True
 SHOW_REPORT = True
 DRAW_GRAPH = True
 
-BI_LSTM_CRF = True
+BI_LSTM_CRF = False
 
 One_Radical = False
 Three_Radicals = False
@@ -426,7 +426,7 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
 # model = LSTMModel(char_num, embedding_num, hidden_num, class_num, bi)
 class LSTMModel(nn.Module):
     # 多少个不重复的汉字， 多少个embedding，LSTM隐藏大小， 分类类别， 双向
-    def __init__(self, char_num, embedding_num, total_rad_ids, hidden_num, class_num, bi=True):
+    def __init__(self, char_num, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, bi=True):
         super().__init__()
         self.embedding = nn.Embedding(char_num, embedding_num)
 
@@ -435,12 +435,12 @@ class LSTMModel(nn.Module):
         self.drop = nn.Dropout(0.5)
 
         if One_Radical:
-            self.one_radical_embedding = nn.Embedding(total_rad_ids, 50)
+            self.one_radical_embedding = nn.Embedding(total_rad_ids, embedding_onerad_num)
             # 一层， batch在前面
-            self.lstm = nn.LSTM(embedding_num + 50, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+            self.lstm = nn.LSTM(embedding_num + embedding_onerad_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
         elif Three_Radicals:
-            self.one_radical_embedding = nn.Embedding(total_rad_ids, 100)
-            self.lstm = nn.LSTM(embedding_num + 100 * 3, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+            self.one_radical_embedding = nn.Embedding(total_rad_ids, embedding_threerad_num)
+            self.lstm = nn.LSTM(embedding_num + embedding_threerad_num * 3, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
         else:
             self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
 
@@ -491,7 +491,7 @@ class LSTMModel(nn.Module):
 # model = LSTM_CRF_Model(char_num, embedding_num, hidden_num, class_num, bi, tag_to_id)
 class LSTM_CRF_Model(nn.Module):
     # 多少个不重复的汉字， 多少个embedding，LSTM隐藏大小， 分类类别， 双向
-    def __init__(self, char_num, embedding_num, total_rad_ids, hidden_num, class_num, bi=True):
+    def __init__(self, char_num, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, bi=True):
         super().__init__()
         # self.tag_to_id = tag_to_id
         # self.tagset_size = class_num
@@ -504,12 +504,12 @@ class LSTM_CRF_Model(nn.Module):
         self.embedding = nn.Embedding(char_num, embedding_num)
 
         if One_Radical:
-            self.one_radical_embedding = nn.Embedding(total_rad_ids, 50)
+            self.one_radical_embedding = nn.Embedding(total_rad_ids, embedding_onerad_num)
             # 一层， batch在前面
-            self.lstm = nn.LSTM(embedding_num + 50, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+            self.lstm = nn.LSTM(embedding_num + embedding_onerad_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
         elif Three_Radicals:
-            self.one_radical_embedding = nn.Embedding(total_rad_ids, 100)
-            self.lstm = nn.LSTM(embedding_num + 100 * 3, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
+            self.one_radical_embedding = nn.Embedding(total_rad_ids, embedding_threerad_num)
+            self.lstm = nn.LSTM(embedding_num + embedding_threerad_num * 3, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
         else:  # no radical
             # 一层， batch在前面
             self.lstm = nn.LSTM(embedding_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
@@ -848,6 +848,11 @@ def final_test_BiLSTM_CRF(test_dataloader):
 
         # remove all O s
         if REMOVE_O:  # true
+            # do the original f1 score
+            # calculate score
+            test_score = f1_score(all_tag_test, all_pre_test, average='micro')  # micro/多类别的
+            print(f'final_test_with_O: f1_score:{test_score:.6f}.)')
+            # do the remove O
             # find the index of O tag:
             O_id = tag_to_id['O']
             # find all O
@@ -872,7 +877,7 @@ def final_test_BiLSTM_CRF(test_dataloader):
 
         # prediction = [id_to_tag[i] for i in model.prediction]
 
-        print(f'final_test: f1_score:{test_score:.3f}.)')
+        print(f'final_test: f1_score:{test_score:.6f}.)')
 
         if SHOW_REPORT:  # true
             # show input character
@@ -916,6 +921,12 @@ def final_test_BiLSTM(test_dataloader):
 
         # remove all O s
         if REMOVE_O:  # true
+            # do the original f1 score
+            # calculate score
+            test_score = f1_score(all_tag_test, all_pre_test, average='micro')  # micro/多类别的
+            print(f'final_test_with_O: f1_score:{test_score:.6f}.)')
+
+            # do the remove O
             # find the index of O tag:
             O_id = tag_to_id['O']
             # find all O
@@ -940,7 +951,7 @@ def final_test_BiLSTM(test_dataloader):
 
         # prediction = [id_to_tag[i] for i in model.prediction]
 
-        print(f'final_test: f1_score:{test_score:.3f}, test_loss:{test_loss:.3f}')
+        print(f'final_test: f1_score:{test_score:.6f}, test_loss:{test_loss:.6f}')
 
         # human readable presentations
         if SHOW_REPORT:  # true
@@ -1047,11 +1058,11 @@ def train_search(config, checkpoint_dir=None):
 
     # SETTING
     if BI_LSTM_CRF:
-        model = LSTM_CRF_Model(char_num, config["embedding_num"], total_rad_ids, config["hidden_num"], class_num, bi)
+        model = LSTM_CRF_Model(char_num, config["embedding_num"], config["embedding_onerad_num"], config["embedding_threerad_num"], total_rad_ids, config["hidden_num"], class_num, bi)
         opt = torch.optim.AdamW(model.parameters(), lr=0.001)  # Adam/AdamW
     else:
-        model = LSTMModel(char_num, config["embedding_num"], total_rad_ids, config["hidden_num"], class_num, bi)
-        opt = torch.optim.AdamW(model.parameters(), lr=0.001)  # Adam/AdamW
+        model = LSTMModel(char_num, config["embedding_num"], config["embedding_onerad_num"], config["embedding_threerad_num"], total_rad_ids, config["hidden_num"], class_num, bi)
+        opt = torch.optim.Adam(model.parameters(), lr=0.001)  # Adam/AdamW
     model = model.to(device)
 
     # draw the curve
@@ -1137,12 +1148,48 @@ def train_search(config, checkpoint_dir=None):
     #     mean_dev_f1=sum(dev_model_f1)/len(dev_model_f1)
     # )
 
-    tune.report(
-        last_train_loss=train_model_lost[-1].item(),
-        last_train_f1=train_model_f1[-1],
-        last_dev_loss=dev_model_lost[-1].item(),
-        last_dev_f1=dev_model_f1[-1])
+    last_train_loss1 = train_model_lost[-1].item()
+    last_train_loss2 = train_model_lost[-2].item()
+    last_train_loss3 = train_model_lost[-3].item()
+    last_train_loss_ave = (last_train_loss1 + last_train_loss2 + last_train_loss3)/3
 
+    last_train_f11 = train_model_f1[-1]
+    last_train_f12 = train_model_f1[-2]
+    last_train_f13 = train_model_f1[-3]
+    last_train_f1_ave = (last_train_f11 + last_train_f12+ last_train_f13)/3
+
+    last_dev_loss1 = dev_model_lost[-1].item()
+    last_dev_loss2 = dev_model_lost[-2].item()
+    last_dev_loss3 = dev_model_lost[-3].item()
+    last_dev_loss_ave = (last_dev_loss1 + last_dev_loss2 + last_dev_loss3)/3
+
+    last_dev_f11 = dev_model_f1[-1]
+    last_dev_f12 = dev_model_f1[-2]
+    last_dev_f13 = dev_model_f1[-3]
+    last_dev_f1_ave = (last_dev_f11+last_dev_f12+last_dev_f13)/3
+
+
+    tune.report(
+        last_train_loss=last_train_loss1,
+        last_train_loss2=last_train_loss2,
+        last_train_loss3=last_train_loss3,
+        last_train_loss_ave=last_train_loss_ave,
+
+        last_train_f1=last_train_f11,
+        last_train_f12=last_train_f12,
+        last_train_f13=last_train_f13,
+        last_train_f1_ave=last_train_f1_ave,
+
+        last_dev_loss1=last_dev_loss1,
+        last_dev_loss2=last_dev_loss2,
+        last_dev_loss3=last_dev_loss3,
+        last_dev_loss_ave=last_dev_loss_ave,
+
+        last_dev_f11=last_dev_f11,
+        last_dev_f12=last_dev_f12,
+        last_dev_f13=last_dev_f13,
+        last_dev_f1_ave = last_dev_f1_ave
+    )
     # TODO
     # Graph
 
@@ -1182,11 +1229,20 @@ if __name__ == "__main__":
             # "lr": tune.loguniform(1e-5, 1e-1),
             # tune.sample_from(lambda spec: 10 ** (-10 * np.random.rand())),
             # "embedding_num": tune.qrandint(20, 400, 30),
-            "embedding_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400]), # ]),#
+            "embedding_num": tune.grid_search([550]), # ]),#
+            # "embedding_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400]),
+            # "embedding_num": tune.grid_search([400,450,500,550,600]),
+
+            "embedding_onerad_num": tune.grid_search([50]),
+            # "embedding_onerad_num": tune.grid_search([10, 20, 30, 40, 50]),
+
+            "embedding_threerad_num": tune.grid_search([50]),
+            # "embedding_threerad_num": tune.grid_search([10, 20, 30, 40, 50]),
             # "embedding_num": tune.grid_search([250]),
             # "hidden_num": tune.qrandint(20, 400, 30),
-            # "hidden_num": tune.grid_search([300]),
-            "hidden_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400]),
+            "hidden_num": tune.grid_search([200]),
+            # "hidden_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400]),
+            # "hidden_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400]),
             # "epoch": tune.randint(15, 25)
         }
         # algo = BayesOptSearch(utility_kwargs={
@@ -1199,7 +1255,7 @@ if __name__ == "__main__":
             train_search,
             num_samples=1,
             scheduler=ASHAScheduler(
-                metric="last_dev_f1",
+                metric="last_dev_f11",
                 mode="max"
             ),
             search_alg=tune.suggest.BasicVariantGenerator(),
@@ -1208,7 +1264,7 @@ if __name__ == "__main__":
         )
         print("Best hyperparameters found were: ",
               analysis.get_best_config(
-                  metric='last_dev_f1',
+                  metric='last_dev_f11',
                   mode='max'
               )
               )
@@ -1241,7 +1297,9 @@ if __name__ == "__main__":
     dev_batch_size = 10
     test_batch_size = 1
     # reduce 0-300
-    embedding_num = 300
+    embedding_num = 200
+    embedding_onerad_num = 50
+    embedding_threerad_num = 50
     ## reduce 100-300
     hidden_num = 400  # one direction ; bi-drectional = 2 * hidden
     bi = True
@@ -1269,11 +1327,11 @@ if __name__ == "__main__":
 
     # SETTING
     if BI_LSTM_CRF:
-        model = LSTM_CRF_Model(char_num, embedding_num, total_rad_ids, hidden_num, class_num, bi)
-        opt = torch.optim.AdamW(model.parameters(), lr=lr)  # Adam/AdamW
+        model = LSTM_CRF_Model(char_num, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, bi)
+        opt = torch.optim.AdamW(model.parameters(), lr=lr)  # AdamW
     else:
-        model = LSTMModel(char_num, embedding_num, total_rad_ids, hidden_num, class_num, bi)
-        opt = torch.optim.AdamW(model.parameters(), lr=lr)  # Adam/AdamW
+        model = LSTMModel(char_num, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, bi)
+        opt = torch.optim.Adam(model.parameters(), lr=lr)  # Adam
     model = model.to(device)
 
     # draw the curve
