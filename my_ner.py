@@ -24,7 +24,7 @@ import cProfile
 
 # global:
 TUNE = True
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 PROFILER = False
 SAVE_MODEL = True
 
@@ -36,7 +36,7 @@ REMOVE_O = True
 SHOW_REPORT = True
 DRAW_GRAPH = True
 
-BI_LSTM_CRF = False
+BI_LSTM_CRF = True
 
 One_Radical = False
 Three_Radicals = False
@@ -1229,8 +1229,8 @@ if __name__ == "__main__":
             # "lr": tune.loguniform(1e-5, 1e-1),
             # tune.sample_from(lambda spec: 10 ** (-10 * np.random.rand())),
             # "embedding_num": tune.qrandint(20, 400, 30),
-            "embedding_num": tune.grid_search([550]), # ]),#
-            # "embedding_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400]),
+            "embedding_num": tune.grid_search([250]), # ]),#
+            # "embedding_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400, 450, 500]),
             # "embedding_num": tune.grid_search([400,450,500,550,600]),
 
             "embedding_onerad_num": tune.grid_search([50]),
@@ -1240,8 +1240,8 @@ if __name__ == "__main__":
             # "embedding_threerad_num": tune.grid_search([10, 20, 30, 40, 50]),
             # "embedding_num": tune.grid_search([250]),
             # "hidden_num": tune.qrandint(20, 400, 30),
-            "hidden_num": tune.grid_search([200]),
-            # "hidden_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400]),
+            "hidden_num": tune.grid_search([300]),
+            # "hidden_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400, 450, 500]),
             # "hidden_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400]),
             # "epoch": tune.randint(15, 25)
         }
