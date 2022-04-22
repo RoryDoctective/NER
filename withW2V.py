@@ -17,9 +17,10 @@ from ray.tune.suggest.hyperopt import HyperOptSearch
 from ray.tune.suggest.bayesopt import BayesOptSearch
 import pandas as pd
 import cProfile
+import gensim
 
 # global:
-TUNE = True
+TUNE = False
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 PROFILER = False
 SAVE_MODEL = True
@@ -32,10 +33,13 @@ REMOVE_O = True
 SHOW_REPORT = True
 DRAW_GRAPH = True
 
-BI_LSTM_CRF = True
+BI_LSTM_CRF = False
 
-One_Radical = True
+One_Radical = False
 Three_Radicals = False
+
+CHAR_PRE_PATH = ".\wiki-corpus\pre_trained_char_100_iter5.txt"
+ONE_RAD_PRE_PATH = ".\wiki-corpus\pre_trained_rad_50_iter5.txt"
 
 ###########         tuned parameters                   ############
 #                           embedding number        hidden number #
@@ -43,6 +47,88 @@ Three_Radicals = False
 # LSTM CRF no radical             500                    450      #
 ###################################################################
 
+# incoprate the genism
+def get_pretrained_model(path_to_file):
+    #model = gensim.models.KeyedVectors.load_word2vec_format(path_to_file, unicode_errors='ignore')
+    model = gensim.models.Word2Vec.load(path_to_file)
+    #weights = torch.FloatTensor(model.vectors)  # formerly syn0, which is soon deprecated
+    return model
+
+def build_new_corpus(split, make_vocab=True, data_dir='Dataset/Weibo'):
+    """Read in data"""
+
+    assert split in ['train', 'dev', 'test']
+
+    char_lists = []
+    tag_lists = []
+
+    with open(os.path.join(data_dir, 'demo.' + split), 'r', encoding='utf-8') as f:
+        char_list = []
+        tag_list = []
+        for line in f:
+            if line != '\n':
+                try:
+                    word, tag = line.strip('\n').split()
+                    char_list.append(word[0])
+                    tag_list.append(tag)
+                except:
+                    # to stop
+                    word, tag = line.strip('\n').split()
+                    #
+                    tag = line.strip('\n').split()
+                    char_list.append(' ')
+                    tag_list.append(tag[0])
+                    # print(tag)
+
+            else:  # line = \n
+                if BI_LSTM_CRF:
+                    char_lists.append(char_list + ["<END>"])
+                    tag_lists.append(tag_list + ["<END>"])
+                else:
+                    char_lists.append(char_list)
+                    tag_lists.append(tag_list)
+                char_list = []
+                tag_list = []
+
+    # reverse = False == shortest sentences first, longest sentences last
+    # when do LSTM-CRF, set it to True
+    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=False)
+    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=False)
+
+    if make_vocab:  # only for training set
+        model = get_pretrained_model(CHAR_PRE_PATH)
+        # add all new character
+        model.build_vocab(char_lists, update=True)
+        # add all other character
+        additional_list=[['<UNK>', '<PAD>']]
+        if BI_LSTM_CRF:
+            additional_list[0].append('<START>')
+        model.build_vocab(additional_list, update=True)
+        # all updated
+
+        total_key = len(model.wv.vectors)
+        char2id = build_new_map(total_key, model)
+
+        tag2id = build_map(tag_lists)
+        tag2id['<PAD>'] = len(tag2id)  # padding label
+
+        if BI_LSTM_CRF:
+            tag2id['<START>'] = len(tag2id)  # start label
+
+        return char_lists, tag_lists, char2id, tag2id, model
+    else:
+        return char_lists, tag_lists
+
+def build_new_map(keys, model):
+    """
+    list to id
+    returns maps = {name:id}
+    """
+    maps = {}
+    for key in range(keys):
+        char = model.wv.index_to_key[key]
+        maps[char] = key
+    return maps
 
 # https://github.com/luopeixiang/named_entity_recognition/blob/master/data.py
 def build_corpus(split, make_vocab=True, data_dir='Dataset/Weibo'):
@@ -83,8 +169,8 @@ def build_corpus(split, make_vocab=True, data_dir='Dataset/Weibo'):
 
     # reverse = False == shortest sentences first, longest sentences last
     # when do LSTM-CRF, set it to True
-    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=True)
-    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=True)
+    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=False)
+    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=False)
 
     if make_vocab:  # only for training set
         char2id = build_map(char_lists)
@@ -361,9 +447,10 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
                 for j in range(3):
                     temp.append(self.id2rad[i][j])
                 radical_index.append(temp)
-        else:
+        else:  # no rad
             for i in char_index:
-                radical_index.append(self.id2rad[i])
+                # radical_index.append(self.id2rad[i])
+                radical_index.append(0)  # just play dummy
 
         return char_index, tag_index, radical_index
 
@@ -417,8 +504,9 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
                     torch.tensor(Temp[:, :, 1], dtype=torch.int64, device=device),
                     torch.tensor(Temp[:, :, 2], dtype=torch.int64, device=device)]
         else:  # no radicals
-            sentences_radical = [i + [self.id2rad[self.char2id['<PAD>']]] * (batch_max_len - len(i))
-                                 for i in sentences_radical]
+            # sentences_radical = [i + [self.id2rad[self.char2id['<PAD>']]] * (batch_max_len - len(i))
+            #                      for i in sentences_radical]
+            sentences_radical=sentences  # play dummy
             return torch.tensor(sentences, dtype=torch.int64, device=device), \
                    torch.tensor(sentences_tag, dtype=torch.int64, device=device), \
                    batch_lens, \
@@ -428,9 +516,9 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
 # model = LSTMModel(char_num, embedding_num, hidden_num, class_num, bi)
 class LSTMModel(nn.Module):
     # 多少个不重复的汉字， 多少个embedding，LSTM隐藏大小， 分类类别， 双向
-    def __init__(self, char_num, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, bi=True):
+    def __init__(self, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, w2v_weight,bi=True):
         super().__init__()
-        self.embedding = nn.Embedding(char_num, embedding_num)
+        self.embedding = nn.Embedding.from_pretrained(w2v_weight)  #(char_num, embedding_num)
 
         # add dropout
         # prob = 0.5 !! can be tunned
@@ -493,7 +581,7 @@ class LSTMModel(nn.Module):
 # model = LSTM_CRF_Model(char_num, embedding_num, hidden_num, class_num, bi, tag_to_id)
 class LSTM_CRF_Model(nn.Module):
     # 多少个不重复的汉字， 多少个embedding，LSTM隐藏大小， 分类类别， 双向
-    def __init__(self, char_num, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, bi=True):
+    def __init__(self, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, w2v_weight, bi=True):
         super().__init__()
         # self.tag_to_id = tag_to_id
         # self.tagset_size = class_num
@@ -503,7 +591,7 @@ class LSTM_CRF_Model(nn.Module):
         self.drop = nn.Dropout(0.5)
 
         # 每一个汉字 + 一个embedding长度 = embedding
-        self.embedding = nn.Embedding(char_num, embedding_num)
+        self.embedding = nn.Embedding.from_pretrained(w2v_weight)
 
         if One_Radical:
             self.one_radical_embedding = nn.Embedding(total_rad_ids, embedding_onerad_num)
@@ -1201,8 +1289,11 @@ if __name__ == "__main__":
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
     # data-load in
-    train_data, train_tag, char_to_index, tag_to_id = build_corpus('train', make_vocab=True,
+    train_data, train_tag, char_to_index, tag_to_id, W2V_model = build_new_corpus('train', make_vocab=True,
                                                                    data_dir=f'Dataset/{DATASET}')
+
+    w2v_weight = torch.FloatTensor(W2V_model.wv.vectors)
+
     if DEV:
         dev_data, dev_tag = build_corpus('dev', make_vocab=False, data_dir=f'Dataset/{DATASET}')
     test_data, test_tag = build_corpus('test', make_vocab=False, data_dir=f'Dataset/{DATASET}')
@@ -1298,8 +1389,12 @@ if __name__ == "__main__":
     train_batch_size = 10
     dev_batch_size = 10
     test_batch_size = 1
+
     # reduce 0-300
-    embedding_num = 200
+    # this is pre-determined by the pretrained weights
+    embedding_num = len(W2V_model.wv['天'])
+
+
     embedding_onerad_num = 50
     embedding_threerad_num = 50
     ## reduce 100-300
@@ -1329,10 +1424,10 @@ if __name__ == "__main__":
 
     # SETTING
     if BI_LSTM_CRF:
-        model = LSTM_CRF_Model(char_num, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, bi)
+        model = LSTM_CRF_Model(embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, w2v_weight,bi)
         opt = torch.optim.AdamW(model.parameters(), lr=lr)  # AdamW
     else:
-        model = LSTMModel(char_num, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, bi)
+        model = LSTMModel(embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, w2v_weight,bi)
         opt = torch.optim.Adam(model.parameters(), lr=lr)  # Adam
     model = model.to(device)
 

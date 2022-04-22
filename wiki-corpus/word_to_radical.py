@@ -7,11 +7,17 @@ class C2R(object):
     def __init__(self, infile, outfile):
         self.infile = infile
         self.outfile = outfile
+
         self.c_corpus = []
         self.r_corpus = []
-        self.read(self.infile)
-        self.c2r()
-        self.write(self.s_corpus, self.outfile)
+        self.char_2_radical= {}
+        self.rad_index_2_rad = {}
+
+        self.get_one_radical()  # read radicals
+        self.radindex_and_rad() # read index radicals
+        self.read(self.infile)  # read lines
+        self.c2r()              # convert
+        self.write(self.r_corpus, self.outfile)  # write out
 
     def read(self, path):
         if os.path.isfile(path) is False:
@@ -48,13 +54,43 @@ class C2R(object):
 
     def convert(self, line):
         # input "双方都是"
-        # output "radical only"
+        # output "一二三四"
+        str_of_rad = ""
         lst_of_chr = self.split(line)
+        # get all radical
+        for i in range(len(lst_of_chr)):
+            char = lst_of_chr[i]
+            its_radin = self.char_2_radical[char]
+            the_rad= self.rad_index_2_rad[int(its_radin)]
+            str_of_rad += the_rad
+        return str_of_rad
 
-        pass 
     
     def split(self, word):
         return [char for char in word]
+
+    def get_one_radical(self, data_dir='../Radical/Unihan_IRGSources.txt'):
+        with open(data_dir, 'r', encoding='utf-8') as f:
+            for line in f:  # for each line
+                # print(line.strip('\n').split())
+                word, attribute, content = line.strip('\n').split()[:3]
+                if attribute == "kRSUnicode":
+                    char = chr(int(word[2:], 16))
+                    if "." in content:
+                        radical, stroke = content.split(".")
+                    else:
+                        radical = content
+                        stroke = '0'
+                    radical = radical.strip("'")
+                    self.char_2_radical[char]=radical
+
+    def radindex_and_rad(self, data_dir='../Radical/radindex_rad.txt'):
+        with open(data_dir, 'r', encoding='utf-8') as f:
+            index = 0
+            for line in f:  # for each line
+                index += 1
+                radical, _ = line.strip('\n').split()[:2]
+                self.rad_index_2_rad[index]=radical
 
 
 if __name__ == "__main__":

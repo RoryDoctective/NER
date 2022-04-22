@@ -45,6 +45,9 @@ Three_Radicals = False
 #                           embedding number        hidden number #
 # LSTM no radical                 400                    300      #
 # LSTM CRF no radical             500                    450      #
+# LSTM one radical                100+
+# LSTM three radical              100+
+# LSTM CRF one radical            100+
 ###################################################################
 
 
