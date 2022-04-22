@@ -35,7 +35,7 @@ DRAW_GRAPH = True
 
 BI_LSTM_CRF = False
 
-One_Radical = False
+One_Radical = True
 Three_Radicals = False
 
 CHAR_PRE_PATH = ".\wiki-corpus\pre_trained_char_100_iter5.txt"
@@ -54,6 +54,7 @@ def get_pretrained_model(path_to_file):
     #weights = torch.FloatTensor(model.vectors)  # formerly syn0, which is soon deprecated
     return model
 
+# https://github.com/luopeixiang/named_entity_recognition/blob/master/data.py
 def build_new_corpus(split, make_vocab=True, data_dir='Dataset/Weibo'):
     """Read in data"""
 
@@ -130,6 +131,18 @@ def build_new_map(keys, model):
         maps[char] = key
     return maps
 
+def build_map(lists):
+    """
+    list to id
+    returns maps = {name:id}
+    """
+    maps = {}
+    for list_ in lists:
+        for e in list_:
+            if e not in maps:
+                maps[e] = len(maps)
+    return maps
+
 # https://github.com/luopeixiang/named_entity_recognition/blob/master/data.py
 def build_corpus(split, make_vocab=True, data_dir='Dataset/Weibo'):
     """Read in data"""
@@ -169,8 +182,8 @@ def build_corpus(split, make_vocab=True, data_dir='Dataset/Weibo'):
 
     # reverse = False == shortest sentences first, longest sentences last
     # when do LSTM-CRF, set it to True
-    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=False)
-    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=False)
+    char_lists = sorted(char_lists, key=lambda x: len(x), reverse=True)
+    tag_lists = sorted(tag_lists, key=lambda x: len(x), reverse=True)
 
     if make_vocab:  # only for training set
         char2id = build_map(char_lists)
@@ -188,23 +201,15 @@ def build_corpus(split, make_vocab=True, data_dir='Dataset/Weibo'):
         return char_lists, tag_lists
 
 
-def build_map(lists):
-    """
-    list to id
-    returns maps = {name:id}
-    """
-    maps = {}
-    for list_ in lists:
-        for e in list_:
-            if e not in maps:
-                maps[e] = len(maps)
-    return maps
-
-
 def build_one_radical(data_dir='Radical/Unihan_IRGSources.txt'):
     """Read in data"""
     global char_to_index
     char_radical_stroke_list = []
+
+    # define the radical embedding model
+    w2v_rad_model = get_pretrained_model(ONE_RAD_PRE_PATH)
+    w2v_rad_model.build_vocab([["<notZh>"]], update=True)
+
 
     with open(data_dir, 'r', encoding='utf-8') as f:
         for line in f:  # for each line
@@ -218,10 +223,15 @@ def build_one_radical(data_dir='Radical/Unihan_IRGSources.txt'):
                     radical = content
                     stroke = '0'
                 radical = radical.strip("'")
+                #
+                rad_index_2_rad = radindex_and_rad()
+                ori_rad_id_2_w2v_rad_id(int(radical), w2v_rad_model, rad_index_2_rad)
+                #
                 char_radical_stroke_list.append([char, radical, stroke])
     # a = [[list[0], list[2]] for index, list in enumerate(char_radical_stroke_list)]
 
-    # get [[id, radical]]
+    # get [[id, radical]]  = [[char_index, radical_index]]
+    # return unk's index if char not found
     id_radical = [[char_to_index.get(list[0], char_to_index["<UNK>"]), list[1]] for index, list in
                   enumerate(char_radical_stroke_list)]
 
@@ -232,19 +242,20 @@ def build_one_radical(data_dir='Radical/Unihan_IRGSources.txt'):
             id_radical_list.append(id_radical[i])
 
     # deal with <UNK, PAD, START>
-    id_radical_list.append([char_to_index["<UNK>"], '0'])
+    the_w2v_rad = w2v_rad_model.wv.key_to_index["<notZh>"]
+    id_radical_list.append([char_to_index["<UNK>"], the_w2v_rad])
 
     # sort by index
     id_radical_list = sorted(id_radical_list, key=itemgetter(0))
 
-    # add 0 as the radical for things not a chinese character
+    # add the_w2v_rad as the radical for things not a chinese character
     for i in range(len(char_to_index)):
         if len(id_radical_list) > i:
             if id_radical_list[i][0] != i:
-                id_radical_list.append([i, '0'])
+                id_radical_list.append([i, the_w2v_rad])
                 id_radical_list = sorted(id_radical_list, key=itemgetter(0))
         else:
-            id_radical_list.append([i, '0'])
+            id_radical_list.append([i, the_w2v_rad])
             id_radical_list = sorted(id_radical_list, key=itemgetter(0))
 
     # get only the radical, and make the map
@@ -252,7 +263,27 @@ def build_one_radical(data_dir='Radical/Unihan_IRGSources.txt'):
     for i in range(len(id_radical_list)):
         ordered_radical.append(int(id_radical_list[i][1]))
     # this is the id2radical
-    return ordered_radical
+    return ordered_radical,w2v_rad_model
+
+
+def radindex_and_rad(data_dir='Radical/radindex_rad.txt'):
+    rad_index_2_rad={}
+    with open(data_dir, 'r', encoding='utf-8') as f:
+        index = 0
+        for line in f:  # for each line
+            index += 1
+            radical, _ = line.strip('\n').split()[:2]
+            rad_index_2_rad[index]=radical
+    return rad_index_2_rad
+
+def ori_rad_id_2_w2v_rad_id(ori_rad_id, model,rad_index_2_rad):
+    # takes one original radical id -> its radical id in train
+    ori_rad = rad_index_2_rad[ori_rad_id]  # eg: 提手旁
+    query = ori_rad  # '天'
+    query_id = model.wv.key_to_index[query]
+    return query_id
+
+
 
 
 def dummy_radical():
@@ -420,7 +451,7 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
         self.tag = tag
         self.char2id = char2id
         self.tag2id = tag2id
-        self.id2rad = id2rad
+        self.id2rad = id2rad #
 
     def __getitem__(self, index):
         # get one sentence
@@ -516,7 +547,7 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
 # model = LSTMModel(char_num, embedding_num, hidden_num, class_num, bi)
 class LSTMModel(nn.Module):
     # 多少个不重复的汉字， 多少个embedding，LSTM隐藏大小， 分类类别， 双向
-    def __init__(self, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, w2v_weight,bi=True):
+    def __init__(self, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, w2v_weight,w2v_1rad_model_weights,bi=True):
         super().__init__()
         self.embedding = nn.Embedding.from_pretrained(w2v_weight)  #(char_num, embedding_num)
 
@@ -525,7 +556,7 @@ class LSTMModel(nn.Module):
         self.drop = nn.Dropout(0.5)
 
         if One_Radical:
-            self.one_radical_embedding = nn.Embedding(total_rad_ids, embedding_onerad_num)
+            self.one_radical_embedding = nn.Embedding.from_pretrained(w2v_1rad_model_weights)
             # 一层， batch在前面
             self.lstm = nn.LSTM(embedding_num + embedding_onerad_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
         elif Three_Radicals:
@@ -581,7 +612,7 @@ class LSTMModel(nn.Module):
 # model = LSTM_CRF_Model(char_num, embedding_num, hidden_num, class_num, bi, tag_to_id)
 class LSTM_CRF_Model(nn.Module):
     # 多少个不重复的汉字， 多少个embedding，LSTM隐藏大小， 分类类别， 双向
-    def __init__(self, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, w2v_weight, bi=True):
+    def __init__(self, embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, w2v_weight,w2v_1rad_weight, bi=True):
         super().__init__()
         # self.tag_to_id = tag_to_id
         # self.tagset_size = class_num
@@ -594,7 +625,7 @@ class LSTM_CRF_Model(nn.Module):
         self.embedding = nn.Embedding.from_pretrained(w2v_weight)
 
         if One_Radical:
-            self.one_radical_embedding = nn.Embedding(total_rad_ids, embedding_onerad_num)
+            self.one_radical_embedding = nn.Embedding.from_pretrained(w2v_1rad_weight)
             # 一层， batch在前面
             self.lstm = nn.LSTM(embedding_num + embedding_onerad_num, hidden_num, num_layers=1, batch_first=True, bidirectional=bi)
         elif Three_Radicals:
@@ -1309,12 +1340,14 @@ if __name__ == "__main__":
 
     # load-in the radicals
     if One_Radical:
-        id_to_radical = build_one_radical(data_dir='Radical/Unihan_IRGSources.txt')
-        total_rad_ids = 215
+        id_to_radical,w2v_1rad_model = build_one_radical(data_dir='Radical/Unihan_IRGSources.txt')
+        total_rad_ids = 215  # one additional radical for not chinese character
+        w2v_1rad_model_weights = torch.FloatTensor(w2v_1rad_model.wv.vectors)
     elif Three_Radicals:
         id_to_radical, total_rad_ids = build_ids(data_dir='Radical/CHISEids.txt')
     else:  # create dummy
         id_to_radical, total_rad_ids = dummy_radical()
+        w2v_1rad_model_weights=0 # dummy
 
     """ place for parameter tuning """
     if TUNE:
@@ -1393,12 +1426,13 @@ if __name__ == "__main__":
     # reduce 0-300
     # this is pre-determined by the pretrained weights
     embedding_num = len(W2V_model.wv['天'])
-
-
-    embedding_onerad_num = 50
+    if One_Radical:
+        embedding_onerad_num = len(w2v_1rad_model.wv['一'])
+    else:
+        embedding_onerad_num = 50
     embedding_threerad_num = 50
     ## reduce 100-300
-    hidden_num = 400  # one direction ; bi-drectional = 2 * hidden
+    hidden_num = 700  # one direction ; bi-drectional = 2 * hidden
     bi = True
     # both direction
     lr = 0.001
@@ -1424,10 +1458,10 @@ if __name__ == "__main__":
 
     # SETTING
     if BI_LSTM_CRF:
-        model = LSTM_CRF_Model(embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, w2v_weight,bi)
+        model = LSTM_CRF_Model(embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, w2v_weight, w2v_1rad_model_weights, bi)
         opt = torch.optim.AdamW(model.parameters(), lr=lr)  # AdamW
     else:
-        model = LSTMModel(embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, w2v_weight,bi)
+        model = LSTMModel(embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, w2v_weight, w2v_1rad_model_weights, bi)
         opt = torch.optim.Adam(model.parameters(), lr=lr)  # Adam
     model = model.to(device)
 

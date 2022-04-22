@@ -142,7 +142,7 @@ def build_one_radical(data_dir='Radical/Unihan_IRGSources.txt'):
                 char_radical_stroke_list.append([char, radical, stroke])
     # a = [[list[0], list[2]] for index, list in enumerate(char_radical_stroke_list)]
 
-    # get [[id, radical]]
+    # get [[id, radical]] = [[char_index, radical_index]]
     id_radical = [[char_to_index.get(list[0], char_to_index["<UNK>"]), list[1]] for index, list in
                   enumerate(char_radical_stroke_list)]
 

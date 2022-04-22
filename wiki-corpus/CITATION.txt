@@ -21,3 +21,7 @@ https://github.com/bamtercelboo/corpus_process_script/tree/master/clean
 
 python clean_corpus.py -h
 python clean_corpus.py --input input_file --output output_file
+
+
+0.504638 vs 0.552876 hidden = 400
+hidden = 300
