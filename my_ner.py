@@ -38,8 +38,14 @@ DRAW_GRAPH = True
 
 BI_LSTM_CRF = True
 
-One_Radical = False
+One_Radical = True
 Three_Radicals = False
+
+###########         tuned parameters                   ############
+#                           embedding number        hidden number #
+# LSTM no radical                 400                    300      #
+# LSTM CRF no radical             500                    450      #
+###################################################################
 
 
 # https://github.com/luopeixiang/named_entity_recognition/blob/master/data.py
@@ -1229,18 +1235,18 @@ if __name__ == "__main__":
             # "lr": tune.loguniform(1e-5, 1e-1),
             # tune.sample_from(lambda spec: 10 ** (-10 * np.random.rand())),
             # "embedding_num": tune.qrandint(20, 400, 30),
-            "embedding_num": tune.grid_search([250]), # ]),#
+            "embedding_num": tune.grid_search([500]), # ]),#
             # "embedding_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400, 450, 500]),
             # "embedding_num": tune.grid_search([400,450,500,550,600]),
 
-            "embedding_onerad_num": tune.grid_search([50]),
-            # "embedding_onerad_num": tune.grid_search([10, 20, 30, 40, 50]),
+            # "embedding_onerad_num": tune.grid_search([50]),
+            "embedding_onerad_num": tune.grid_search([10, 20, 30, 40, 50,60,70,80,90,100]),
 
             "embedding_threerad_num": tune.grid_search([50]),
-            # "embedding_threerad_num": tune.grid_search([10, 20, 30, 40, 50]),
+            # "embedding_threerad_num": tune.grid_search([10, 20, 30, 40, 50, 60, 70, 80, 90, 100]),
             # "embedding_num": tune.grid_search([250]),
             # "hidden_num": tune.qrandint(20, 400, 30),
-            "hidden_num": tune.grid_search([300]),
+            "hidden_num": tune.grid_search([450]),
             # "hidden_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400, 450, 500]),
             # "hidden_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400]),
             # "epoch": tune.randint(15, 25)

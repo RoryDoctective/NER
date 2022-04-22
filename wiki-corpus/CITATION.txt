@@ -1,0 +1,23 @@
+-------------------
+Title:
+https://bamtercelboo.github.io/2018/05/10/wikidata_Process/
+-------------------
+Wiki Process 
+https://github.com/bamtercelboo/corpus_process_script/blob/master/wikidata_process/wiki_process.py
+
+python wiki_process.py input_file output_file
+like:
+	python wiki_process.py zhwiki-latest.xml.bz2 wiki.txt
+
+-------------------
+Traditional Chinese to Simplified Chinese
+https://github.com/bamtercelboo/corpus_process_script/tree/master/chinese_t2s
+
+python chinese_t2s.py -h
+python chinese_t2s.py --input input_file --output output_file
+-------------------
+remove characters that are not Chinese characters
+https://github.com/bamtercelboo/corpus_process_script/tree/master/clean
+
+python clean_corpus.py -h
+python clean_corpus.py --input input_file --output output_file

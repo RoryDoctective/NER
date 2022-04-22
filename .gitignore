@@ -112,3 +112,8 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+*.bz2
+wiki-corpus/wiki.txt
+wiki-corpus/simple_ch.txt
+wiki-corpus/only_ch.txt
+Pretrained/merge_sgns_bigram_char300.txt
