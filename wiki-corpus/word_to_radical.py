@@ -1,3 +1,5 @@
+# adapt from the chinese_t2s.py
+
 import sys
 import os
 from optparse import OptionParser

@@ -2,7 +2,10 @@
 # -*- coding:utf-8 -*-
 # time: 2021/11/25
 
-# the codes are learnt from https://github.com/shouxieai/nlp-bilstm_crf-ner
+# the codes are learnt and adapted from resource:
+# https://github.com/shouxieai/nlp-bilstm_crf-ner
+# https://pytorch.org/tutorials/beginner/nlp/advanced_tutorial.html
+# https://github.com/mali19064/LSTM-CRF-pytorch-faster
 
 import os
 from itertools import zip_longest
@@ -36,10 +39,10 @@ REMOVE_O = True
 SHOW_REPORT = True
 DRAW_GRAPH = True
 
-BI_LSTM_CRF = True
+BI_LSTM_CRF = False
 
-One_Radical = True
-Three_Radicals = False
+One_Radical = False
+Three_Radicals = True
 
 ###########         tuned parameters                   ############
 #                           embedding number        hidden number #
@@ -1242,14 +1245,14 @@ if __name__ == "__main__":
             # "embedding_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400, 450, 500]),
             # "embedding_num": tune.grid_search([400,450,500,550,600]),
 
-            # "embedding_onerad_num": tune.grid_search([50]),
-            "embedding_onerad_num": tune.grid_search([10, 20, 30, 40, 50,60,70,80,90,100]),
+            "embedding_onerad_num": tune.grid_search([50]),
+            # "embedding_onerad_num": tune.grid_search([10, 20, 30, 40, 50,60,70,80,90,100]),
 
-            "embedding_threerad_num": tune.grid_search([50]),
+            "embedding_threerad_num": tune.grid_search([80]),
             # "embedding_threerad_num": tune.grid_search([10, 20, 30, 40, 50, 60, 70, 80, 90, 100]),
             # "embedding_num": tune.grid_search([250]),
             # "hidden_num": tune.qrandint(20, 400, 30),
-            "hidden_num": tune.grid_search([450]),
+            "hidden_num": tune.grid_search([300]),
             # "hidden_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400, 450, 500]),
             # "hidden_num": tune.grid_search([100, 150, 200, 250, 300, 350, 400]),
             # "epoch": tune.randint(15, 25)

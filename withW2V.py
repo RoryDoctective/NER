@@ -1,4 +1,8 @@
-# the codes are learnt from https://github.com/shouxieai/nlp-bilstm_crf-ner
+# the codes are learnt and adapted from resource:
+# https://github.com/shouxieai/nlp-bilstm_crf-ner
+# https://pytorch.org/tutorials/beginner/nlp/advanced_tutorial.html
+# https://github.com/mali19064/LSTM-CRF-pytorch-faster
+# https://github.com/luopeixiang/named_entity_recognition
 
 import os
 from itertools import zip_longest
@@ -18,6 +22,7 @@ from ray.tune.suggest.bayesopt import BayesOptSearch
 import pandas as pd
 import cProfile
 import gensim
+from collections import Counter
 
 # global:
 TUNE = False
@@ -25,9 +30,13 @@ TUNE = False
 PROFILER = False
 SAVE_MODEL = True
 
-# Weibo, Resume, MSRA(no_dev), Literature(error), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
-DATASET = 'Weibo'
-DEV = True
+# E-commers has pure white space
+# word, tag = line.strip('\n').split()
+
+# Weibo, Resume, MSRA(no_dev), Literature(error-ok), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
+# MSRA (no dev), Weibo, Literature, Resume, E-commerce, CLUENER, Novel, Finance(no_dev)
+DATASET = 'MSRA'
+DEV = False
 
 REMOVE_O = True
 SHOW_REPORT = True
@@ -35,11 +44,12 @@ DRAW_GRAPH = True
 
 BI_LSTM_CRF = False
 
-One_Radical = True
+One_Radical = False
 Three_Radicals = False
 
-CHAR_PRE_PATH = ".\wiki-corpus\pre_trained_char_100_iter5.txt"
-ONE_RAD_PRE_PATH = ".\wiki-corpus\pre_trained_rad_50_iter5.txt"
+CHAR_PRE_PATH = ".\wiki-corpus\pre_trained_char_500_iter5.txt"
+ONE_RAD_PRE_PATH = ".\wiki-corpus\pre_trained_rad_100_iter5.txt"
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 ###########         tuned parameters                   ############
 #                           embedding number        hidden number #
@@ -74,7 +84,7 @@ def build_new_corpus(split, make_vocab=True, data_dir='Dataset/Weibo'):
                     tag_list.append(tag)
                 except:
                     # to stop
-                    word, tag = line.strip('\n').split()
+                    # word, tag = line.strip('\n').split()
                     #
                     tag = line.strip('\n').split()
                     char_list.append(' ')
@@ -163,7 +173,7 @@ def build_corpus(split, make_vocab=True, data_dir='Dataset/Weibo'):
                     tag_list.append(tag)
                 except:
                     # to stop
-                    word, tag = line.strip('\n').split()
+                    # word, tag = line.strip('\n').split()
                     #
                     tag = line.strip('\n').split()
                     char_list.append(' ')
@@ -282,8 +292,6 @@ def ori_rad_id_2_w2v_rad_id(ori_rad_id, model,rad_index_2_rad):
     query = ori_rad  # '天'
     query_id = model.wv.key_to_index[query]
     return query_id
-
-
 
 
 def dummy_radical():
@@ -924,6 +932,185 @@ class LSTM_CRF_Model(nn.Module):
         return path_score, best_path
 
 
+# https://github.com/luopeixiang/named_entity_recognition/blob/master/utils.py
+def flatten_lists(lists):
+    flatten_list = []
+    for l in lists:
+        if type(l) == list:
+            flatten_list += l
+        else:
+            flatten_list.append(l)
+    return flatten_list
+
+# https://github.com/luopeixiang/named_entity_recognition/blob/master/evaluating.py
+class Metrics(object):
+    """用于评价模型，计算每个标签的精确率，召回率，F1分数"""
+
+    def __init__(self, golden_tags, predict_tags, remove_O=False):
+
+        # [[t1, t2], [t3, t4]...] --> [t1, t2, t3, t4...]
+        self.golden_tags = flatten_lists(golden_tags)
+        self.predict_tags = flatten_lists(predict_tags)
+
+        if remove_O:  # 将O标记移除，只关心实体标记
+            self._remove_Otags()
+
+        # 辅助计算的变量
+        self.tagset = set(self.golden_tags)
+        self.correct_tags_number = self.count_correct_tags()
+        self.predict_tags_counter = Counter(self.predict_tags)
+        self.golden_tags_counter = Counter(self.golden_tags)
+
+        # 计算精确率
+        self.precision_scores = self.cal_precision()
+
+        # 计算召回率
+        self.recall_scores = self.cal_recall()
+
+        # 计算F1分数
+        self.f1_scores = self.cal_f1()
+
+    def cal_precision(self):
+
+        precision_scores = {}
+        for tag in self.tagset:
+            try:
+                precision_scores[tag] = self.correct_tags_number.get(tag, 0) / \
+                    self.predict_tags_counter[tag]
+            except:
+                print(f"predict_tags_counter[{tag}] = 0")
+                precision_scores[tag] = 0
+        return precision_scores
+
+    def cal_recall(self):
+
+        recall_scores = {}
+        for tag in self.tagset:
+            recall_scores[tag] = self.correct_tags_number.get(tag, 0) / \
+                self.golden_tags_counter[tag]
+        return recall_scores
+
+    def cal_f1(self):
+        f1_scores = {}
+        for tag in self.tagset:
+            p, r = self.precision_scores[tag], self.recall_scores[tag]
+            f1_scores[tag] = 2*p*r / (p+r+1e-10)  # 加上一个特别小的数，防止分母为0
+        return f1_scores
+
+    def report_scores(self):
+        """将结果用表格的形式打印出来，像这个样子：
+                      precision    recall  f1-score   support
+              B-LOC      0.775     0.757     0.766      1084
+              I-LOC      0.601     0.631     0.616       325
+             B-MISC      0.698     0.499     0.582       339
+             I-MISC      0.644     0.567     0.603       557
+              B-ORG      0.795     0.801     0.798      1400
+              I-ORG      0.831     0.773     0.801      1104
+              B-PER      0.812     0.876     0.843       735
+              I-PER      0.873     0.931     0.901       634
+          avg/total      0.779     0.764     0.770      6178
+        """
+        # 打印表头
+        header_format = '{:>9s}  {:>9} {:>9} {:>9} {:>9}'
+        header = ['precision', 'recall', 'f1-score', 'support']
+        print(header_format.format('', *header))
+
+        row_format = '{:>9s}  {:>9.4f} {:>9.4f} {:>9.4f} {:>9}'
+        # 打印每个标签的 精确率、召回率、f1分数
+        for tag in self.tagset:
+            print(row_format.format(
+                tag,
+                self.precision_scores[tag],
+                self.recall_scores[tag],
+                self.f1_scores[tag],
+                self.golden_tags_counter[tag]
+            ))
+
+        # 计算并打印平均值
+        avg_metrics = self._cal_weighted_average()
+        print(row_format.format(
+            'avg/total',
+            avg_metrics['precision'],
+            avg_metrics['recall'],
+            avg_metrics['f1_score'],
+            len(self.golden_tags)
+        ))
+
+    def count_correct_tags(self):
+        """计算每种标签预测正确的个数(对应精确率、召回率计算公式上的tp)，用于后面精确率以及召回率的计算"""
+        correct_dict = {}
+        for gold_tag, predict_tag in zip(self.golden_tags, self.predict_tags):
+            if gold_tag == predict_tag:
+                if gold_tag not in correct_dict:
+                    correct_dict[gold_tag] = 1
+                else:
+                    correct_dict[gold_tag] += 1
+
+        return correct_dict
+
+    def _cal_weighted_average(self):
+
+        weighted_average = {}
+        total = len(self.golden_tags)
+
+        # 计算weighted precisions:
+        weighted_average['precision'] = 0.
+        weighted_average['recall'] = 0.
+        weighted_average['f1_score'] = 0.
+        for tag in self.tagset:
+            size = self.golden_tags_counter[tag]
+            weighted_average['precision'] += self.precision_scores[tag] * size
+            weighted_average['recall'] += self.recall_scores[tag] * size
+            weighted_average['f1_score'] += self.f1_scores[tag] * size
+
+        for metric in weighted_average.keys():
+            weighted_average[metric] /= total
+
+        return weighted_average
+
+    def _remove_Otags(self):
+
+        length = len(self.golden_tags)
+        O_tag_indices = [i for i in range(length)
+                         if self.golden_tags[i] == 'O']
+
+        self.golden_tags = [tag for i, tag in enumerate(self.golden_tags)
+                            if i not in O_tag_indices]
+
+        self.predict_tags = [tag for i, tag in enumerate(self.predict_tags)
+                             if i not in O_tag_indices]
+        print("原总标记数为{}，移除了{}个O标记，占比{:.2f}%".format(
+            length,
+            len(O_tag_indices),
+            len(O_tag_indices) / length * 100
+        ))
+
+    def report_confusion_matrix(self):
+        """计算混淆矩阵"""
+
+        print("\nConfusion Matrix:")
+        tag_list = list(self.tagset)
+        # 初始化混淆矩阵 matrix[i][j]表示第i个tag被模型预测成第j个tag的次数
+        tags_size = len(tag_list)
+        matrix = []
+        for i in range(tags_size):
+            matrix.append([0] * tags_size)
+
+        # 遍历tags列表
+        for golden_tag, predict_tag in zip(self.golden_tags, self.predict_tags):
+            try:
+                row = tag_list.index(golden_tag)
+                col = tag_list.index(predict_tag)
+                matrix[row][col] += 1
+            except ValueError:  # 有极少数标记没有出现在golden_tags，但出现在predict_tags，跳过这些标记
+                continue
+
+        # 输出矩阵
+        row_format_ = '{:>7} ' * (tags_size+1)
+        print(row_format_.format("", *tag_list))
+        for i, row in enumerate(matrix):
+            print(row_format_.format(tag_list[i], *row))
+
 def test():
     global char_to_index, model, id_to_tag, device
     while True:
@@ -1046,6 +1233,13 @@ def final_test_BiLSTM(test_dataloader):
             # calculate score
             test_score = f1_score(all_tag_test, all_pre_test, average='micro')  # micro/多类别的
             print(f'final_test_with_O: f1_score:{test_score:.6f}.)')
+
+            prediction = [id_to_tag[i] for i in all_pre_test]
+            ground_truth = [id_to_tag[i] for i in all_tag_test]
+            # all_tag_test_ = id_to_tag[all_tag_test]  # convert int to tag
+            # all_pre_test_ = id_to_tag[all_pre_test]
+            M = Metrics(ground_truth, prediction, remove_O=True)
+            M.report_scores()
 
             # do the remove O
             # find the index of O tag:
@@ -1180,9 +1374,11 @@ def train_search(config, checkpoint_dir=None):
     # SETTING
     if BI_LSTM_CRF:
         model = LSTM_CRF_Model(char_num, config["embedding_num"], config["embedding_onerad_num"], config["embedding_threerad_num"], total_rad_ids, config["hidden_num"], class_num, bi)
+        # with W
         opt = torch.optim.AdamW(model.parameters(), lr=0.001)  # Adam/AdamW
     else:
         model = LSTMModel(char_num, config["embedding_num"], config["embedding_onerad_num"], config["embedding_threerad_num"], total_rad_ids, config["hidden_num"], class_num, bi)
+        # pure adam
         opt = torch.optim.Adam(model.parameters(), lr=0.001)  # Adam/AdamW
     model = model.to(device)
 
@@ -1418,7 +1614,7 @@ if __name__ == "__main__":
     ''' end of profile '''
 
     # training setting
-    epoch = 25
+    epoch = 5
     train_batch_size = 10
     dev_batch_size = 10
     test_batch_size = 1
@@ -1432,7 +1628,7 @@ if __name__ == "__main__":
         embedding_onerad_num = 50
     embedding_threerad_num = 50
     ## reduce 100-300
-    hidden_num = 700  # one direction ; bi-drectional = 2 * hidden
+    hidden_num = 400  # one direction ; bi-drectional = 2 * hidden
     bi = True
     # both direction
     lr = 0.001
