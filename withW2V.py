@@ -35,16 +35,16 @@ SAVE_MODEL = True
 
 # Weibo, Resume, MSRA(no_dev), Literature(error-ok), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
 # MSRA (no dev), Weibo, Literature, Resume, E-commerce, CLUENER, Novel, Finance(no_dev)
-DATASET = 'MSRA'
-DEV = False
+DATASET = 'Resume'
+DEV = True
 
 REMOVE_O = True
 SHOW_REPORT = True
 DRAW_GRAPH = True
 
-BI_LSTM_CRF = False
+BI_LSTM_CRF = True
 
-One_Radical = True
+One_Radical = False
 Three_Radicals = False
 
 CHAR_PRE_PATH = ".\wiki-corpus\pre_trained_char_500_iter5.txt"
@@ -758,9 +758,7 @@ class LSTM_CRF_Model(nn.Module):
         # [10, 176, 20] = batch, max_length_of_input_sentences, tags的种类
         batch_size, max_len, out_size = feats.size()
         device = feats.device
-        # tags = size [10, 176]
-        # score = size [10]
-        _score = torch.zeros(10).to(device)
+
         # [tag_to_id['<START>']] = [19]
         # torch.tensor([self.tag_to_ix[START_TAG]], dtype=torch.long) = tensor([19])
         # [torch.tensor([self.tag_to_ix[START_TAG]], dtype=torch.long), tags] =
@@ -771,6 +769,14 @@ class LSTM_CRF_Model(nn.Module):
         # add start
         #   torch.Size([10, 177])
         tags = torch.cat([torch.tensor([tag_to_id['<START>']], dtype=torch.long).expand(batch_size, 1).to(device), tags], 1)
+
+        # tags = size [10, 176]
+        # score = size [10]
+        if len(tags[:, 0 + 1])< 10:
+            _score = torch.zeros(len(tags[:, 0 + 1])).to(device)
+        else:
+            _score = torch.zeros(10).to(device)
+
 
         # swap dimension of the feats
         # [10, 176, 20] -> [176, 10, 20]
@@ -796,9 +802,16 @@ class LSTM_CRF_Model(nn.Module):
 
             # Trans: tags[i] -> tags[i + 1] ; size[10]
             # + Emission size[10]
-            _score = _score + \
-                self.transition[tags[:, i + 1], tags[:, i]] + emission
-
+            try:
+                _score = _score + \
+                    self.transition[tags[:, i + 1], tags[:, i]] + emission
+            except:
+                print(self.transition[tags[:, i + 1], tags[:, i]])
+                print(emission)
+                print(_score)
+                print(i)
+                print(ids) # of size 8
+                exit()
         """this end tag is not needed"""
         # # add end : tran: 2->4, last tag to end tag
         # _score = _score + self.transition[torch.tensor(tag_to_id['<END>'], dtype=torch.long).expand(batch_size), tags[:, -1]]
@@ -1171,6 +1184,7 @@ def final_test_BiLSTM_CRF(test_dataloader):
             # all_pre_test_ = id_to_tag[all_pre_test]
             M = Metrics(ground_truth, prediction, remove_O=True)
             M.report_scores()
+            exit()
             #################################################################
 
 
@@ -1256,6 +1270,7 @@ def final_test_BiLSTM(test_dataloader):
             # all_pre_test_ = id_to_tag[all_pre_test]
             M = Metrics(ground_truth, prediction, remove_O=True)
             M.report_scores()
+            exit()
             #################################################################
             # do the remove O
             # find the index of O tag:
@@ -1620,7 +1635,6 @@ if __name__ == "__main__":
         # dfs = analysis.trial_dataframes
         # [d.mean_accuracy.plot() for d in dfs.values()]
 
-        exit()
     """ place for parameter tuning """
 
     ''' place for profile'''

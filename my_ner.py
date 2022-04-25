@@ -28,23 +28,24 @@ import cProfile
 from collections import Counter
 
 # global:
-TUNE = True
+TUNE = False
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 PROFILER = False
 SAVE_MODEL = True
-
+# 9999999999999999999999999999999999999999999
 # Weibo, Resume, MSRA(no_dev), Literature(error), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
-DATASET = 'Weibo'
-DEV = True
+# MSRA (no dev), Weibo, Literature, Resume, E-commerce, CLUENER, Novel, Finance(no_dev)
+DATASET = 'E-commerce'
+DEV = False
 
 REMOVE_O = True
 SHOW_REPORT = True
 DRAW_GRAPH = True
 
-BI_LSTM_CRF = False
+BI_LSTM_CRF = True
 
 One_Radical = False
-Three_Radicals = True
+Three_Radicals = False
 
 ###########         tuned parameters                   ############
 #                           embedding number        hidden number #
@@ -76,7 +77,7 @@ def build_corpus(split, make_vocab=True, data_dir='Dataset/Weibo'):
                     tag_list.append(tag)
                 except:
                     # to stop
-                    word, tag = line.strip('\n').split()
+                    # word, tag = line.strip('\n').split()
                     #
                     tag = line.strip('\n').split()
                     char_list.append(' ')
@@ -642,9 +643,7 @@ class LSTM_CRF_Model(nn.Module):
         # [10, 176, 20] = batch, max_length_of_input_sentences, tags的种类
         batch_size, max_len, out_size = feats.size()
         device = feats.device
-        # tags = size [10, 176]
-        # score = size [10]
-        _score = torch.zeros(10).to(device)
+
         # [tag_to_id['<START>']] = [19]
         # torch.tensor([self.tag_to_ix[START_TAG]], dtype=torch.long) = tensor([19])
         # [torch.tensor([self.tag_to_ix[START_TAG]], dtype=torch.long), tags] =
@@ -655,6 +654,13 @@ class LSTM_CRF_Model(nn.Module):
         # add start
         #   torch.Size([10, 177])
         tags = torch.cat([torch.tensor([tag_to_id['<START>']], dtype=torch.long).expand(batch_size, 1).to(device), tags], 1)
+
+        # tags = size [10, 176]
+        # score = size [10]
+        if len(tags[:, 0 + 1]) < 10:
+            _score = torch.zeros(len(tags[:, 0 + 1])).to(device)
+        else:
+            _score = torch.zeros(10).to(device)
 
         # swap dimension of the feats
         # [10, 176, 20] -> [176, 10, 20]
@@ -1053,6 +1059,7 @@ def final_test_BiLSTM_CRF(test_dataloader):
             # all_pre_test_ = id_to_tag[all_pre_test]
             M = Metrics(ground_truth, prediction, remove_O=True)
             M.report_scores()
+            exit()
             #################################################################
             # do the remove O
             # find the index of O tag:
@@ -1136,8 +1143,9 @@ def final_test_BiLSTM(test_dataloader):
             # all_pre_test_ = id_to_tag[all_pre_test]
             M = Metrics(ground_truth, prediction, remove_O=True)
             M.report_scores()
+            exit()
             #################################################################
-            
+
             # do the remove O
             # find the index of O tag:
             O_id = tag_to_id['O']
@@ -1508,12 +1516,12 @@ if __name__ == "__main__":
     train_batch_size = 10
     dev_batch_size = 10
     test_batch_size = 1
-    # reduce 0-300
-    embedding_num = 200
-    embedding_onerad_num = 50
-    embedding_threerad_num = 50
+    # reduce 0-300 # 9999999999999999999999999999999999999999999
+    embedding_num = 400
+    embedding_onerad_num = 100
+    embedding_threerad_num = 100
     ## reduce 100-300
-    hidden_num = 400  # one direction ; bi-drectional = 2 * hidden
+    hidden_num = 300  # one direction ; bi-drectional = 2 * hidden
     bi = True
     # both direction
     lr = 0.001
