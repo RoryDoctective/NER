@@ -35,7 +35,7 @@ SAVE_MODEL = True
 # 9999999999999999999999999999999999999999999
 # Weibo, Resume, MSRA(no_dev), Literature(error), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
 # MSRA (no dev), Weibo, Literature, Resume, E-commerce, CLUENER, Novel, Finance(no_dev)
-DATASET = 'E-commerce'
+DATASET = 'MSRA'
 DEV = False
 
 REMOVE_O = True
@@ -1190,13 +1190,13 @@ def final_test_BiLSTM(test_dataloader):
 
 
 def save_model(model):
-    torch.save(model, 'save_model/model.pk1')  # save entire net
-    torch.save(model.state_dict(), 'save_model/model_parameters.pk1')  # save dict
+    torch.save(model, 'save_model/model_my_ner.pk1')  # save entire net
+    torch.save(model.state_dict(), 'save_model/model_my_ner_parameters.pk1')  # save dict
 
 
 def load_model():
-    model = torch.load('save_model/model.pk1')
-    model.load_state_dict(torch.load('save_model/model_parameters.pk1'))
+    model = torch.load('save_model/model_my_ner.pk1')
+    model.load_state_dict(torch.load('save_model/model_my_ner_parameters.pk1'))
     model.eval()
     return model
 
@@ -1324,6 +1324,9 @@ def train_search(config, checkpoint_dir=None):
         train_model_lost.append(train_loss.detach().cpu())
         # print(f'train_loss:{train_loss:.3f}')
         print(f'epoch:{e}, train_f1_score:{train_score:.5f}, train_loss:{train_loss:.5f}')
+
+        if e%5 == 0:
+            save_model(model)
 
         if DEV:
             # evaluation
@@ -1517,11 +1520,11 @@ if __name__ == "__main__":
     dev_batch_size = 10
     test_batch_size = 1
     # reduce 0-300 # 9999999999999999999999999999999999999999999
-    embedding_num = 400
+    embedding_num = 500
     embedding_onerad_num = 100
     embedding_threerad_num = 100
     ## reduce 100-300
-    hidden_num = 300  # one direction ; bi-drectional = 2 * hidden
+    hidden_num = 450  # one direction ; bi-drectional = 2 * hidden
     bi = True
     # both direction
     lr = 0.001
@@ -1595,6 +1598,9 @@ if __name__ == "__main__":
         train_model_lost.append(train_loss.detach().cpu())
         # print(f'train_loss:{train_loss:.3f}')
         print(f'epoch:{e}, train_f1_score:{train_score:.5f}, train_loss:{train_loss:.5f}')
+
+        if e%5 == 0:
+            save_model(model)
 
         if DEV:
             # evaluation
