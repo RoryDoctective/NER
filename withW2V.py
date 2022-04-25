@@ -44,11 +44,12 @@ DRAW_GRAPH = True
 
 BI_LSTM_CRF = False
 
-One_Radical = False
+One_Radical = True
 Three_Radicals = False
 
 CHAR_PRE_PATH = ".\wiki-corpus\pre_trained_char_500_iter5.txt"
 ONE_RAD_PRE_PATH = ".\wiki-corpus\pre_trained_rad_100_iter5.txt"
+
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 ###########         tuned parameters                   ############
@@ -1111,6 +1112,7 @@ class Metrics(object):
         for i, row in enumerate(matrix):
             print(row_format_.format(tag_list[i], *row))
 
+
 def test():
     global char_to_index, model, id_to_tag, device
     while True:
@@ -1156,10 +1158,22 @@ def final_test_BiLSTM_CRF(test_dataloader):
 
         # remove all O s
         if REMOVE_O:  # true
+            ###########################################################
             # do the original f1 score
             # calculate score
             test_score = f1_score(all_tag_test, all_pre_test, average='micro')  # micro/多类别的
             print(f'final_test_with_O: f1_score:{test_score:.6f}.)')
+
+            prediction = [id_to_tag[i] for i in all_pre_test]
+            ground_truth = [id_to_tag[i] for i in all_tag_test]
+            print("start metrics")
+            # all_tag_test_ = id_to_tag[all_tag_test]  # convert int to tag
+            # all_pre_test_ = id_to_tag[all_pre_test]
+            M = Metrics(ground_truth, prediction, remove_O=True)
+            M.report_scores()
+            #################################################################
+
+
             # do the remove O
             # find the index of O tag:
             O_id = tag_to_id['O']
@@ -1229,6 +1243,7 @@ def final_test_BiLSTM(test_dataloader):
 
         # remove all O s
         if REMOVE_O:  # true
+            ###########################################################
             # do the original f1 score
             # calculate score
             test_score = f1_score(all_tag_test, all_pre_test, average='micro')  # micro/多类别的
@@ -1236,11 +1251,12 @@ def final_test_BiLSTM(test_dataloader):
 
             prediction = [id_to_tag[i] for i in all_pre_test]
             ground_truth = [id_to_tag[i] for i in all_tag_test]
+            print("start metrics")
             # all_tag_test_ = id_to_tag[all_tag_test]  # convert int to tag
             # all_pre_test_ = id_to_tag[all_pre_test]
             M = Metrics(ground_truth, prediction, remove_O=True)
             M.report_scores()
-
+            #################################################################
             # do the remove O
             # find the index of O tag:
             O_id = tag_to_id['O']
@@ -1614,7 +1630,7 @@ if __name__ == "__main__":
     ''' end of profile '''
 
     # training setting
-    epoch = 5
+    epoch = 25
     train_batch_size = 10
     dev_batch_size = 10
     test_batch_size = 1
