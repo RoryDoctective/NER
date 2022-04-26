@@ -35,7 +35,7 @@ SAVE_MODEL = True
 
 # Weibo, Resume, MSRA(no_dev), Literature(error-ok), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
 # MSRA (no dev), Weibo, Literature, Resume, E-commerce, CLUENER, Novel, Finance(no_dev)
-DATASET = 'MSRA'
+DATASET = 'Finance'
 DEV = False
 
 REMOVE_O = True
@@ -44,7 +44,7 @@ DRAW_GRAPH = True
 
 BI_LSTM_CRF = True
 
-One_Radical = False
+One_Radical = True
 Three_Radicals = False
 
 CHAR_PRE_PATH = ".\wiki-corpus\pre_trained_char_500_iter5.txt"
@@ -1692,7 +1692,11 @@ if __name__ == "__main__":
     else:
         model = LSTMModel(embedding_num, embedding_onerad_num, embedding_threerad_num, total_rad_ids, hidden_num, class_num, w2v_weight, w2v_1rad_model_weights, bi)
         opt = torch.optim.Adam(model.parameters(), lr=lr)  # Adam
+    ##############################
+    # model = model.to(device)
+    # model = load_model()
     model = model.to(device)
+    ##############################
 
     # draw the curve
     train_model_f1 = []

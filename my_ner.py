@@ -35,7 +35,7 @@ SAVE_MODEL = True
 # 9999999999999999999999999999999999999999999
 # Weibo, Resume, MSRA(no_dev), Literature(error), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
 # MSRA (no dev), Weibo, Literature, Resume, E-commerce, CLUENER, Novel, Finance(no_dev)
-DATASET = 'MSRA'
+DATASET = 'Finance'
 DEV = False
 
 REMOVE_O = True
@@ -1190,13 +1190,13 @@ def final_test_BiLSTM(test_dataloader):
 
 
 def save_model(model):
-    torch.save(model, 'save_model/model_my_ner.pk1')  # save entire net
-    torch.save(model.state_dict(), 'save_model/model_my_ner_parameters.pk1')  # save dict
+    torch.save(model, 'save_model/model.pk1')  # save entire net
+    torch.save(model.state_dict(), 'save_model/model_parameters.pk1')  # save dict
 
 
 def load_model():
-    model = torch.load('save_model/model_my_ner.pk1')
-    model.load_state_dict(torch.load('save_model/model_my_ner_parameters.pk1'))
+    model = torch.load('save_model/model.pk1')
+    model.load_state_dict(torch.load('save_model/model_parameters.pk1'))
     model.eval()
     return model
 
