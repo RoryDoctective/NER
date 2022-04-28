@@ -45,7 +45,7 @@ DRAW_GRAPH = True
 BI_LSTM_CRF = True
 
 One_Radical = False
-Three_Radicals = False
+Three_Radicals = True
 
 ###########         tuned parameters                   ############
 #                           embedding number        hidden number #
