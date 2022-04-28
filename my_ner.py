@@ -35,17 +35,17 @@ SAVE_MODEL = True
 # 9999999999999999999999999999999999999999999
 # Weibo, Resume, MSRA(no_dev), Literature(error), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
 # MSRA (no dev), Weibo, Literature, Resume, E-commerce, CLUENER, Novel, Finance(no_dev)
-DATASET = 'Finance'
-DEV = False
+DATASET = 'Weibo'
+DEV = True
 
 REMOVE_O = True
 SHOW_REPORT = True
 DRAW_GRAPH = True
 
-BI_LSTM_CRF = True
+BI_LSTM_CRF = False
 
-One_Radical = False
-Three_Radicals = True
+One_Radical = True
+Three_Radicals = False
 
 ###########         tuned parameters                   ############
 #                           embedding number        hidden number #

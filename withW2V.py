@@ -33,16 +33,15 @@ SAVE_MODEL = True
 # E-commers has pure white space
 # word, tag = line.strip('\n').split()
 
-# Weibo, Resume, MSRA(no_dev), Literature(error-ok), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
 # MSRA (no dev), Weibo, Literature, Resume, E-commerce, CLUENER, Novel, Finance(no_dev)
-DATASET = 'Finance'
-DEV = False
+DATASET = 'Weibo'
+DEV = True
 
 REMOVE_O = True
 SHOW_REPORT = True
 DRAW_GRAPH = True
 
-BI_LSTM_CRF = True
+BI_LSTM_CRF = False
 
 One_Radical = True
 Three_Radicals = False
@@ -1316,13 +1315,13 @@ def final_test_BiLSTM(test_dataloader):
 
 
 def save_model(model):
-    torch.save(model, 'save_model/model_w2v.pk1')  # save entire net
-    torch.save(model.state_dict(), 'save_model/model_parameters_w2v.pk1')  # save dict
+    torch.save(model, 'save_model/model.pk1')  # save entire net
+    torch.save(model.state_dict(), 'save_model/model_parameters.pk1')  # save dict
 
 
 def load_model():
-    model = torch.load('save_model/model_w2v.pk1')
-    model.load_state_dict(torch.load('save_model/model_parameters_w2v.pk1'))
+    model = torch.load('save_model/model.pk1')
+    model.load_state_dict(torch.load('save_model/model_parameters.pk1'))
     model.eval()
     return model
 
