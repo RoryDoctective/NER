@@ -118,3 +118,7 @@ wiki-corpus/simple_ch.txt
 wiki-corpus/only_ch.txt
 Pretrained/merge_sgns_bigram_char300.txt
 wiki-corpus/only_rd.txt
+wiki-corpus/不要提交/corpus/only_ch.txt
+wiki-corpus/不要提交/corpus/only_rd.txt
+wiki-corpus/不要提交/corpus/simple_ch.txt
+wiki-corpus/不要提交/corpus/wiki.txt

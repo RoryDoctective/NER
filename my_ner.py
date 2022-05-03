@@ -33,6 +33,7 @@ TUNE = False
 PROFILER = False
 SAVE_MODEL = True
 # 9999999999999999999999999999999999999999999
+############################see raw sentence and tags
 # Weibo, Resume, MSRA(no_dev), Literature(error), CLUENER, Novel(long_time_to_test), Finance(no_dev), E-commerce(error)
 # MSRA (no dev), Weibo, Literature, Resume, E-commerce, CLUENER, Novel, Finance(no_dev)
 DATASET = 'Weibo'
@@ -44,7 +45,7 @@ DRAW_GRAPH = True
 
 BI_LSTM_CRF = False
 
-One_Radical = True
+One_Radical = False
 Three_Radicals = False
 
 ###########         tuned parameters                   ############
@@ -356,6 +357,7 @@ class MyDataset(Dataset):  # Inherit the torch Dataset
 
         # get each char's/tag's index in each sentence
         #   tag should always be seen before.
+        ############################see raw sentence and tags
         tag_index = [self.tag2id[i] for i in sentence_tag]
         char_index = []
         for i in sentence:
